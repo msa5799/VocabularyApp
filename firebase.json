@@ -1,0 +1,14 @@
+{
+  "react-native": {
+    "android_app_id": "1:259200248319:android:YOUR_ANDROID_APP_ID",
+    "ios_app_id": "1:259200248319:ios:YOUR_IOS_APP_ID"
+  },
+  "hosting": {
+    "public": "web-build",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ]
+  }
+}

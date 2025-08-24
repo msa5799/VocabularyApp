@@ -1,20 +1,34 @@
+import React, { useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View } from 'react-native';
+import { Platform } from 'react-native';
+import { Provider } from 'react-redux';
+import { store } from './src/store';
+import SimpleWebNavigator from './src/navigation/SimpleWebNavigator';
+import { databaseService } from './src/services/storage/database';
+import { webStorageService } from './src/services/storage/webStorage';
 
 export default function App() {
+  useEffect(() => {
+    const initializeApp = async () => {
+      try {
+        if (Platform.OS === 'web') {
+          await webStorageService.initializeDatabase();
+        } else {
+          await databaseService.initializeDatabase();
+        }
+        console.log('App initialized successfully');
+      } catch (error) {
+        console.error('App initialization failed:', error);
+      }
+    };
+
+    initializeApp();
+  }, []);
+
   return (
-    <View style={styles.container}>
-      <Text>Open up App.tsx to start working on your app!</Text>
+    <Provider store={store}>
       <StatusBar style="auto" />
-    </View>
+      <SimpleWebNavigator />
+    </Provider>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});
