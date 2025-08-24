@@ -7,6 +7,7 @@ import {
   ScrollView,
   Alert,
   ActivityIndicator,
+  Dimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSelector, useDispatch } from 'react-redux';
@@ -15,8 +16,12 @@ import { CEFRLevel } from '../../types/database';
 import { updateWordProgress } from '../../store/slices/progressSlice';
 import { updateUserLevel as updateUserLevelAction } from '../../store/slices/authSlice';
 import { databaseService } from '../../services/storage/database';
-import { webStorageService } from '../../services/storage/webStorage';
+// webStorageService removed - using Firestore only
 import { Platform } from 'react-native';
+
+const { width, height } = Dimensions.get('window');
+const isSmallScreen = width < 768;
+const isMobile = width < 480;
 
 interface Props {
   navigation: any;
@@ -59,6 +64,8 @@ const TestScreen: React.FC<Props> = ({ navigation, route }) => {
   const [testCompleted, setTestCompleted] = useState(false);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
   const [startTime, setStartTime] = useState<Date | null>(null);
+  const [sidebarVisible, setSidebarVisible] = useState(false);
+  const [canNavigateBack, setCanNavigateBack] = useState(false);
 
   const getTestTitle = () => {
     switch (testType) {
@@ -524,17 +531,17 @@ const TestScreen: React.FC<Props> = ({ navigation, route }) => {
 
     const scorePercentage = Math.round((correctAnswers / questions.length) * 100);
     
-    // Seviye belirleme algoritması (50 soru için güncellenmiş)
+    // Daha sıkı seviye belirleme algoritması (50 soru için)
     let estimatedLevel: CEFRLevel = 'A1';
     
     // Her seviyedeki soru sayıları: A1(8), A2(8), B1(10), B2(10), C1(8), C2(6)
-    // Seviye belirleme için minimum doğru cevap sayıları ve genel başarı oranı
-    if (levelScores.C2 >= 3 && scorePercentage >= 80) estimatedLevel = 'C2';
-    else if (levelScores.C1 >= 4 && scorePercentage >= 75) estimatedLevel = 'C1';
-    else if (levelScores.B2 >= 5 && scorePercentage >= 70) estimatedLevel = 'B2';
-    else if (levelScores.B1 >= 6 && scorePercentage >= 65) estimatedLevel = 'B1';
-    else if (levelScores.A2 >= 5 && scorePercentage >= 60) estimatedLevel = 'A2';
-    else if (levelScores.A1 >= 4 && scorePercentage >= 50) estimatedLevel = 'A1';
+    // Daha yüksek minimum doğru cevap sayıları ve başarı oranları
+    if (levelScores.C2 >= 5 && scorePercentage >= 85 && correctAnswers >= 42) estimatedLevel = 'C2';
+    else if (levelScores.C1 >= 6 && scorePercentage >= 80 && correctAnswers >= 38) estimatedLevel = 'C1';
+    else if (levelScores.B2 >= 7 && scorePercentage >= 75 && correctAnswers >= 35) estimatedLevel = 'B2';
+    else if (levelScores.B1 >= 7 && scorePercentage >= 70 && correctAnswers >= 30) estimatedLevel = 'B1';
+    else if (levelScores.A2 >= 6 && scorePercentage >= 65 && correctAnswers >= 25) estimatedLevel = 'A2';
+    else if (levelScores.A1 >= 5 && scorePercentage >= 60 && correctAnswers >= 20) estimatedLevel = 'A1';
     else estimatedLevel = 'A1'; // Varsayılan seviye
 
     return {
@@ -550,12 +557,12 @@ const TestScreen: React.FC<Props> = ({ navigation, route }) => {
     if (!user) return;
     
     try {
-      const storageService = Platform.OS === 'web' ? webStorageService : databaseService;
-      await storageService.updateUserLevel(user.id, newLevel);
+      const storageService = databaseService; // Using database service for all platforms
+      await storageService.updateUserLevel(parseInt(user.id), newLevel);
       
       // Test sonucunu kaydet
       const testData = {
-        user_id: user.id,
+        user_id: parseInt(user.id),
         test_type: 'level_assessment' as const,
         cefr_level: newLevel,
         total_questions: testResult!.totalQuestions,
@@ -597,6 +604,71 @@ const TestScreen: React.FC<Props> = ({ navigation, route }) => {
 
   const handleAnswerSelect = (answerIndex: number) => {
     setSelectedAnswer(answerIndex);
+    
+    // Cevap seçildikten sonra otomatik olarak bir sonraki soruya geç
+    setTimeout(() => {
+      if (currentQuestionIndex < questions.length - 1) {
+        // Mevcut cevabı kaydet
+        const newAnswers = [...userAnswers];
+        newAnswers[currentQuestionIndex] = answerIndex;
+        setUserAnswers(newAnswers);
+        
+        // Bir sonraki soruya geç
+        setCurrentQuestionIndex(currentQuestionIndex + 1);
+        setSelectedAnswer(userAnswers[currentQuestionIndex + 1] || null);
+      } else {
+         // Son soru ise testi bitir
+         const newAnswers = [...userAnswers];
+         newAnswers[currentQuestionIndex] = answerIndex;
+         setUserAnswers(newAnswers);
+         
+         // Test sonucunu hesapla ve bitir
+         const result = calculateTestResult(newAnswers);
+         setTestResult(result);
+         setTestCompleted(true);
+         
+         // Kullanıcı seviyesini güncelle
+         if (testType === 'level_test') {
+           updateUserLevel(result.estimatedLevel);
+         }
+       }
+    }, 500); // 500ms bekle, kullanıcı seçimini görebilsin
+  };
+
+  // Navigation functions
+  const navigateToQuestion = (index: number) => {
+    if (index >= 0 && index < questions.length) {
+      // Save current answer before navigating
+      if (selectedAnswer !== null) {
+        const newAnswers = [...userAnswers];
+        newAnswers[currentQuestionIndex] = selectedAnswer;
+        setUserAnswers(newAnswers);
+      }
+      
+      setCurrentQuestionIndex(index);
+      setSelectedAnswer(userAnswers[index] || null);
+      setSidebarVisible(false);
+      setCanNavigateBack(true);
+    }
+  };
+
+  const goToPreviousQuestion = () => {
+    if (currentQuestionIndex > 0) {
+      navigateToQuestion(currentQuestionIndex - 1);
+    }
+  };
+
+  const goToNextQuestion = () => {
+    if (currentQuestionIndex < questions.length - 1) {
+      navigateToQuestion(currentQuestionIndex + 1);
+    }
+  };
+
+  const getQuestionStatus = (index: number) => {
+    if (userAnswers[index] !== undefined) {
+      return 'answered';
+    }
+    return 'unanswered';
   };
 
   const handleNextQuestion = () => {
@@ -605,12 +677,13 @@ const TestScreen: React.FC<Props> = ({ navigation, route }) => {
       return;
     }
 
-    const newAnswers = [...userAnswers, selectedAnswer];
+    const newAnswers = [...userAnswers];
+    newAnswers[currentQuestionIndex] = selectedAnswer;
     setUserAnswers(newAnswers);
-    setSelectedAnswer(null);
-
+    
     if (currentQuestionIndex < questions.length - 1) {
       setCurrentQuestionIndex(currentQuestionIndex + 1);
+      setSelectedAnswer(userAnswers[currentQuestionIndex + 1] || null);
     } else {
       // Test tamamlandı
       const result = calculateTestResult([...newAnswers]);
@@ -786,7 +859,82 @@ const TestScreen: React.FC<Props> = ({ navigation, route }) => {
 
     return (
       <View style={styles.container}>
+        {/* Sidebar */}
+        {sidebarVisible && (
+          <>
+            <TouchableOpacity 
+              style={styles.sidebarOverlay} 
+              onPress={() => setSidebarVisible(false)}
+            />
+            <View style={styles.sidebar}>
+              <View style={styles.sidebarHeader}>
+                <Text style={styles.sidebarTitle}>Soru Listesi</Text>
+                <Text style={styles.sidebarSubtitle}>{questions.length} soru</Text>
+              </View>
+              <ScrollView style={styles.sidebarContent}>
+                {questions.map((question, index) => {
+                  const status = getQuestionStatus(index);
+                  const isCurrent = index === currentQuestionIndex;
+                  return (
+                    <TouchableOpacity
+                      key={index}
+                      style={[styles.questionListItem, isCurrent && styles.currentQuestionItem]}
+                      onPress={() => navigateToQuestion(index)}
+                    >
+                      <View style={[
+                        styles.questionItemNumber,
+                        isCurrent && styles.currentQuestionNumber,
+                        status === 'answered' && styles.answeredQuestionNumber
+                      ]}>
+                        <Text style={[
+                          styles.questionItemNumberText,
+                          isCurrent && styles.currentQuestionNumberText,
+                          status === 'answered' && styles.answeredQuestionNumberText
+                        ]}>
+                          {index + 1}
+                        </Text>
+                      </View>
+                      <View style={styles.questionItemContent}>
+                        <Text style={styles.questionItemText} numberOfLines={2}>
+                          {question.question}
+                        </Text>
+                        <View style={styles.questionItemMeta}>
+                          <View style={[styles.questionItemBadge, { backgroundColor: getLevelColor(question.level) }]}>
+                            <Text style={styles.questionItemBadgeText}>{question.level}</Text>
+                          </View>
+                          <Text style={styles.questionItemStatus}>
+                            {status === 'answered' ? 'Cevaplanmış' : 'Cevaplanmamış'}
+                          </Text>
+                        </View>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+              <View style={styles.sidebarFooter}>
+                <TouchableOpacity 
+                  style={styles.sidebarCloseButton}
+                  onPress={() => setSidebarVisible(false)}
+                >
+                  <Text style={styles.sidebarCloseButtonText}>Kapat</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </>
+        )}
+
         <View style={styles.testHeader}>
+          <View style={styles.headerTop}>
+            <TouchableOpacity 
+              style={styles.sidebarButton}
+              onPress={() => setSidebarVisible(true)}
+            >
+              <Ionicons name="list" size={24} color="#6366f1" />
+            </TouchableOpacity>
+            <Text style={styles.testTitle}>Seviye Tespit Sınavı</Text>
+            <View style={styles.headerSpacer} />
+          </View>
+          
           <View style={styles.progressContainer}>
             <View style={styles.progressBar}>
               <View style={[styles.progressFill, { width: `${progress}%` }]} />
@@ -831,26 +979,26 @@ const TestScreen: React.FC<Props> = ({ navigation, route }) => {
         </ScrollView>
 
         <View style={styles.bottomContainer}>
-          <TouchableOpacity 
-            style={[
-              styles.nextButton,
-              selectedAnswer === null && styles.disabledButton
-            ]} 
-            onPress={handleNextQuestion}
-            disabled={selectedAnswer === null}
-          >
-            <Text style={[
-              styles.nextButtonText,
-              selectedAnswer === null && styles.disabledButtonText
-            ]}>
-              {currentQuestionIndex === questions.length - 1 ? 'Testi Bitir' : 'Sonraki Soru'}
-            </Text>
-            <Ionicons 
-              name={currentQuestionIndex === questions.length - 1 ? 'checkmark' : 'arrow-forward'} 
-              size={20} 
-              color={selectedAnswer === null ? '#9ca3af' : '#fff'} 
-            />
-          </TouchableOpacity>
+          {/* Navigation Buttons */}
+          <View style={styles.navigationButtons}>
+            <TouchableOpacity
+              style={[styles.navButton, currentQuestionIndex === 0 && styles.navButtonDisabled]}
+              onPress={goToPreviousQuestion}
+              disabled={currentQuestionIndex === 0}
+            >
+              <Ionicons name="chevron-back" size={20} color={currentQuestionIndex === 0 ? '#9ca3af' : '#6366f1'} />
+              <Text style={[styles.navButtonText, currentQuestionIndex === 0 && styles.navButtonDisabledText]}>Önceki</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={[styles.navButton, currentQuestionIndex === questions.length - 1 && styles.navButtonDisabled]}
+              onPress={goToNextQuestion}
+              disabled={currentQuestionIndex === questions.length - 1}
+            >
+              <Text style={[styles.navButtonText, currentQuestionIndex === questions.length - 1 && styles.navButtonDisabledText]}>Sonraki</Text>
+              <Ionicons name="chevron-forward" size={20} color={currentQuestionIndex === questions.length - 1 ? '#9ca3af' : '#6366f1'} />
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
     );
@@ -883,38 +1031,39 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-    padding: 20,
+    padding: isMobile ? 16 : 20,
     justifyContent: 'center',
   },
   header: {
     alignItems: 'center',
-    marginBottom: 40,
+    marginBottom: isMobile ? 24 : 40,
   },
   title: {
-    fontSize: 28,
+    fontSize: isMobile ? 22 : 28,
     fontWeight: 'bold',
     color: '#1f2937',
-    marginTop: 16,
+    marginTop: isMobile ? 12 : 16,
+    textAlign: 'center',
   },
   subtitle: {
-    fontSize: 16,
+    fontSize: isMobile ? 14 : 16,
     color: '#6b7280',
-    marginTop: 8,
+    marginTop: isMobile ? 6 : 8,
     textAlign: 'center',
   },
   placeholder: {
     backgroundColor: '#ffffff',
-    padding: 30,
-    borderRadius: 12,
+    padding: isMobile ? 20 : 30,
+    borderRadius: isMobile ? 8 : 12,
     alignItems: 'center',
     boxShadow: '0 2px 3.84px rgba(0, 0, 0, 0.1)',
     elevation: 5,
   },
   placeholderText: {
-    fontSize: 16,
+    fontSize: isMobile ? 14 : 16,
     color: '#6b7280',
     textAlign: 'center',
-    lineHeight: 24,
+    lineHeight: isMobile ? 20 : 24,
   },
   // Loading styles
   centered: {
@@ -923,27 +1072,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   loadingText: {
-    marginTop: 16,
-    fontSize: 16,
+    marginTop: isMobile ? 12 : 16,
+    fontSize: isMobile ? 14 : 16,
     color: '#6b7280',
   },
   // Info card styles
   infoCard: {
     backgroundColor: '#ffffff',
-    padding: 20,
-    borderRadius: 12,
-    marginBottom: 24,
+    padding: isMobile ? 16 : 20,
+    borderRadius: isMobile ? 8 : 12,
+    marginBottom: isMobile ? 16 : 24,
     boxShadow: '0 2px 3.84px rgba(0, 0, 0, 0.1)',
     elevation: 5,
   },
   infoTitle: {
-    fontSize: 18,
+    fontSize: isMobile ? 16 : 18,
     fontWeight: 'bold',
     color: '#1f2937',
-    marginBottom: 12,
+    marginBottom: isMobile ? 8 : 12,
   },
   infoText: {
-    fontSize: 14,
+    fontSize: isMobile ? 12 : 14,
     color: '#6b7280',
     marginBottom: 4,
   },
@@ -1101,18 +1250,19 @@ const styles = StyleSheet.create({
   // Test header styles
   testHeader: {
     backgroundColor: '#ffffff',
-    padding: 20,
+    padding: isMobile ? 16 : 20,
+    paddingTop: isMobile ? 50 : 20, // Safe area for mobile
     borderBottomWidth: 1,
     borderBottomColor: '#e5e7eb',
   },
   progressContainer: {
-    marginBottom: 16,
+    marginBottom: isMobile ? 12 : 16,
   },
   progressBar: {
-    height: 8,
+    height: isMobile ? 6 : 8,
     backgroundColor: '#e5e7eb',
     borderRadius: 4,
-    marginBottom: 8,
+    marginBottom: isMobile ? 6 : 8,
   },
   progressFill: {
     height: '100%',
@@ -1120,7 +1270,7 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   progressText: {
-    fontSize: 14,
+    fontSize: isMobile ? 12 : 14,
     color: '#6b7280',
     textAlign: 'center',
   },
@@ -1146,21 +1296,21 @@ const styles = StyleSheet.create({
   // Question styles
   questionContainer: {
     flex: 1,
-    padding: 20,
+    padding: isMobile ? 16 : 20,
   },
   questionText: {
-    fontSize: 18,
+    fontSize: isMobile ? 16 : 18,
     color: '#1f2937',
-    marginBottom: 24,
-    lineHeight: 26,
+    marginBottom: isMobile ? 16 : 24,
+    lineHeight: isMobile ? 22 : 26,
   },
   optionsContainer: {
-    gap: 12,
+    gap: isMobile ? 8 : 12,
   },
   optionButton: {
     backgroundColor: '#ffffff',
-    padding: 16,
-    borderRadius: 12,
+    padding: isMobile ? 12 : 16,
+    borderRadius: isMobile ? 8 : 12,
     borderWidth: 2,
     borderColor: '#e5e7eb',
   },
@@ -1169,7 +1319,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#f0f9ff',
   },
   optionText: {
-    fontSize: 16,
+    fontSize: isMobile ? 14 : 16,
     color: '#1f2937',
   },
   selectedOptionText: {
@@ -1178,7 +1328,7 @@ const styles = StyleSheet.create({
   },
   // Bottom container styles
   bottomContainer: {
-    padding: 20,
+    padding: isMobile ? 16 : 20,
     backgroundColor: '#ffffff',
     borderTopWidth: 1,
     borderTopColor: '#e5e7eb',
@@ -1188,20 +1338,199 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 16,
-    borderRadius: 12,
+    padding: isMobile ? 12 : 16,
+    borderRadius: isMobile ? 8 : 12,
   },
   disabledButton: {
     backgroundColor: '#e5e7eb',
   },
   nextButtonText: {
     color: '#ffffff',
-    fontSize: 16,
+    fontSize: isMobile ? 14 : 16,
     fontWeight: 'bold',
-    marginRight: 8,
+    marginRight: isMobile ? 6 : 8,
   },
   disabledButtonText: {
     color: '#9ca3af',
+  },
+  // Navigation buttons styles
+  navigationButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: isMobile ? 12 : 16,
+  },
+  navButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: isMobile ? 16 : 24,
+    paddingVertical: isMobile ? 12 : 16,
+    borderRadius: isMobile ? 8 : 12,
+    backgroundColor: '#f3f4f6',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    minWidth: isMobile ? 100 : 120,
+    justifyContent: 'center',
+  },
+  navButtonDisabled: {
+    backgroundColor: '#f9fafb',
+    borderColor: '#f3f4f6',
+  },
+  navButtonText: {
+    fontSize: isMobile ? 14 : 16,
+    fontWeight: '600',
+    color: '#6366f1',
+    marginHorizontal: 4,
+  },
+  navButtonDisabledText: {
+    color: '#9ca3af',
+  },
+  // Sidebar styles
+  sidebarOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    zIndex: 999,
+  },
+  sidebar: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    width: isMobile ? '90%' : '80%',
+    height: '100%',
+    backgroundColor: '#ffffff',
+    zIndex: 1000,
+    shadowColor: '#000',
+    shadowOffset: { width: -2, height: 0 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  sidebarHeader: {
+    padding: isMobile ? 16 : 20,
+    paddingTop: isMobile ? 50 : 20, // Safe area for mobile
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
+    backgroundColor: '#f9fafb',
+  },
+  sidebarTitle: {
+    fontSize: isMobile ? 16 : 18,
+    fontWeight: 'bold',
+    color: '#1f2937',
+    marginBottom: 4,
+  },
+  sidebarSubtitle: {
+    fontSize: isMobile ? 12 : 14,
+    color: '#6b7280',
+  },
+  sidebarContent: {
+    flex: 1,
+    padding: isMobile ? 12 : 16,
+  },
+  questionListItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: isMobile ? 8 : 12,
+    marginBottom: isMobile ? 6 : 8,
+    backgroundColor: '#f9fafb',
+    borderRadius: isMobile ? 6 : 8,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  currentQuestionItem: {
+    backgroundColor: '#eff6ff',
+    borderColor: '#3b82f6',
+  },
+  questionItemNumber: {
+    width: isMobile ? 28 : 32,
+    height: isMobile ? 28 : 32,
+    borderRadius: isMobile ? 14 : 16,
+    backgroundColor: '#e5e7eb',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: isMobile ? 8 : 12,
+  },
+  currentQuestionNumber: {
+    backgroundColor: '#3b82f6',
+  },
+  answeredQuestionNumber: {
+    backgroundColor: '#10b981',
+  },
+  questionItemNumberText: {
+    fontSize: isMobile ? 12 : 14,
+    fontWeight: 'bold',
+    color: '#6b7280',
+  },
+  currentQuestionNumberText: {
+    color: '#ffffff',
+  },
+  answeredQuestionNumberText: {
+    color: '#ffffff',
+  },
+  questionItemContent: {
+    flex: 1,
+  },
+  questionItemText: {
+    fontSize: isMobile ? 12 : 14,
+    color: '#1f2937',
+    marginBottom: 4,
+  },
+  questionItemMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  questionItemBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 12,
+  },
+  questionItemBadgeText: {
+    fontSize: isMobile ? 10 : 12,
+    fontWeight: 'bold',
+    color: '#ffffff',
+  },
+  questionItemStatus: {
+    fontSize: isMobile ? 10 : 12,
+    color: '#6b7280',
+  },
+  sidebarFooter: {
+    padding: isMobile ? 16 : 20,
+    borderTopWidth: 1,
+    borderTopColor: '#e5e7eb',
+  },
+  sidebarCloseButton: {
+    backgroundColor: '#6366f1',
+    paddingVertical: isMobile ? 10 : 12,
+    paddingHorizontal: isMobile ? 20 : 24,
+    borderRadius: isMobile ? 6 : 8,
+    alignItems: 'center',
+  },
+  sidebarCloseButtonText: {
+    color: '#ffffff',
+    fontSize: isMobile ? 14 : 16,
+    fontWeight: '600',
+  },
+  headerTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: isMobile ? 12 : 16,
+  },
+  sidebarButton: {
+    padding: isMobile ? 6 : 8,
+    borderRadius: isMobile ? 6 : 8,
+    backgroundColor: '#f3f4f6',
+  },
+  testTitle: {
+    fontSize: isMobile ? 16 : 18,
+    fontWeight: 'bold',
+    color: '#1f2937',
+  },
+  headerSpacer: {
+    width: 40,
   },
 });
 

@@ -118,15 +118,23 @@ class DatabaseService {
   }
 
   // User operations
-  async createUser(userData: Omit<User, 'id' | 'created_at' | 'updated_at'>): Promise<number> {
+  async createUser(userData: Omit<User, 'id' | 'created_at' | 'updated_at'>): Promise<User> {
     if (!this.db) throw new Error('Database not initialized');
     
+    const now = new Date().toISOString();
     const result = await this.db.runAsync(
-      'INSERT INTO users (email, username, password_hash, current_level) VALUES (?, ?, ?, ?)',
-      [userData.email, userData.username, userData.password_hash, userData.current_level]
+      'INSERT INTO users (email, username, password_hash, current_level, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+      [userData.email, userData.username, userData.password_hash, userData.current_level, now, now]
     );
     
-    return result.lastInsertRowId;
+    const newUser: User = {
+      ...userData,
+      id: result.lastInsertRowId.toString(),
+      created_at: now,
+      updated_at: now
+    };
+    
+    return newUser;
   }
 
   async getUserByEmail(email: string): Promise<User | null> {

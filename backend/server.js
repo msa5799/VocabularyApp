@@ -29,10 +29,36 @@ app.post('/api/translate', async (req, res) => {
       return res.status(400).json({ error: 'Text is required' });
     }
 
-    // Google Translate API endpoint
+    // Try MyMemory API first (more reliable)
+    try {
+      const myMemoryUrl = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=en|${targetLang}`;
+      
+      const response = await axios.get(myMemoryUrl, {
+        timeout: 5000,
+        headers: {
+          'User-Agent': 'VocabularyApp/1.0'
+        }
+      });
+
+      if (response.data && response.data.responseData && response.data.responseData.translatedText) {
+        const translatedText = response.data.responseData.translatedText;
+        return res.json({ 
+          success: true, 
+          originalText: text,
+          translatedText: translatedText,
+          targetLanguage: targetLang,
+          service: 'MyMemory'
+        });
+      }
+    } catch (myMemoryError) {
+      console.log('MyMemory API failed, trying Google Translate:', myMemoryError.message);
+    }
+
+    // Fallback to Google Translate API
     const googleTranslateUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${targetLang}&dt=t&q=${encodeURIComponent(text)}`;
     
     const response = await axios.get(googleTranslateUrl, {
+      timeout: 5000,
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
       }
@@ -46,7 +72,8 @@ app.post('/api/translate', async (req, res) => {
         success: true, 
         originalText: text,
         translatedText: translatedText,
-        targetLanguage: targetLang 
+        targetLanguage: targetLang,
+        service: 'Google Translate'
       });
     } else {
       throw new Error('Invalid response format from Google Translate');
@@ -234,9 +261,14 @@ app.post('/api/generate-level-test', async (req, res) => {
     
     Make sure the JSON is valid, properly formatted, and contains exactly 50 text-based English language questions.`;
     
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    const text = response.text();
+    // Use retry mechanism for Gemini API call
+    const result = await retryWithBackoff(async () => {
+      const apiResult = await model.generateContent(prompt);
+      const apiResponse = await apiResult.response;
+      return apiResponse.text();
+    });
+    
+    const text = result;
     
     // Try to parse the JSON response
     let questionsData;
@@ -740,6 +772,355 @@ app.post('/api/generate-level-test', async (req, res) => {
   }
 });
 
+// Rate limiting için basit in-memory store
+const rateLimitStore = new Map();
+const RATE_LIMIT_WINDOW = 60000; // 1 minute
+const MAX_REQUESTS_PER_MINUTE = 8; // Gemini free tier limit is 10, we use 8 to be safe
+
+// Rate limiting middleware
+function checkRateLimit(req, res, next) {
+  const clientId = req.ip || 'default';
+  const now = Date.now();
+  
+  if (!rateLimitStore.has(clientId)) {
+    rateLimitStore.set(clientId, { count: 1, resetTime: now + RATE_LIMIT_WINDOW });
+    return next();
+  }
+  
+  const clientData = rateLimitStore.get(clientId);
+  
+  if (now > clientData.resetTime) {
+    // Reset the counter
+    rateLimitStore.set(clientId, { count: 1, resetTime: now + RATE_LIMIT_WINDOW });
+    return next();
+  }
+  
+  if (clientData.count >= MAX_REQUESTS_PER_MINUTE) {
+    return res.status(429).json({
+      success: false,
+      error: 'Rate limit exceeded',
+      message: 'Too many requests. Please wait before trying again.',
+      retryAfter: Math.ceil((clientData.resetTime - now) / 1000)
+    });
+  }
+  
+  clientData.count++;
+  next();
+}
+
+// Retry function with exponential backoff
+async function retryWithBackoff(fn, maxRetries = 3) {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (error.message.includes('429') || error.message.includes('quota')) {
+        if (i === maxRetries - 1) throw error;
+        
+        const delay = Math.pow(2, i) * 1000 + Math.random() * 1000; // Exponential backoff with jitter
+        console.log(`Rate limit hit, retrying in ${delay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      } else {
+        throw error;
+      }
+    }
+  }
+}
+
+// Gemini AI Word Learning Assistant endpoint
+app.post('/api/word-learning-assistant', checkRateLimit, async (req, res) => {
+  try {
+    const { word, userLevel = 'beginner', context = '' } = req.body;
+    
+    if (!word) {
+      return res.status(400).json({ error: 'Word is required' });
+    }
+
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+    
+    const prompt = `
+    As an English language learning assistant, analyze the word "${word}" and provide:
+    
+    1. CEFR Level (A1, A2, B1, B2, C1, C2)
+    2. Difficulty Score (1-10, where 1 is easiest)
+    3. Learning Priority (high/medium/low) for a ${userLevel} level student
+    4. Memory Techniques (2-3 specific techniques to remember this word)
+    5. Usage Context (formal/informal/academic/casual)
+    6. Common Collocations (3-5 words that commonly go with this word)
+    7. Similar Words (synonyms and related words)
+    8. Learning Tips (specific advice for mastering this word)
+    
+    ${context ? `Context provided: "${context}"` : ''}
+    
+    Please respond in JSON format with the following structure:
+    {
+      "word": "${word}",
+      "cefrLevel": "B1",
+      "difficultyScore": 5,
+      "learningPriority": "medium",
+      "memoryTechniques": ["technique1", "technique2"],
+      "usageContext": "casual",
+      "collocations": ["word1", "word2", "word3"],
+      "similarWords": ["synonym1", "synonym2"],
+      "learningTips": "Specific advice for learning this word",
+      "explanation": "Brief explanation of why this level/difficulty was assigned"
+    }
+    `;
+
+    // Use retry mechanism for Gemini API call
+    const result = await retryWithBackoff(async () => {
+      const apiResult = await model.generateContent(prompt);
+      const apiResponse = await apiResult.response;
+      return apiResponse.text();
+    });
+    
+    const text = result;
+    
+    try {
+      // Try to parse JSON from the response
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const analysisData = JSON.parse(jsonMatch[0]);
+        res.json({
+          success: true,
+          analysis: analysisData
+        });
+      } else {
+        throw new Error('No JSON found in response');
+      }
+    } catch (parseError) {
+      // If JSON parsing fails, return raw text
+      res.json({
+        success: true,
+        analysis: {
+          word: word,
+          rawResponse: text,
+          cefrLevel: 'B1', // Default fallback
+          difficultyScore: 5,
+          learningPriority: 'medium'
+        }
+      });
+    }
+    
+  } catch (error) {
+    console.error('Gemini AI Word Learning error:', error.message);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Word learning analysis failed', 
+      message: error.message 
+    });
+  }
+});
+
+// Gemini AI Personalized Learning Path endpoint
+app.post('/api/personalized-learning-path', checkRateLimit, async (req, res) => {
+  try {
+    const { words, userLevel = 'beginner', learningGoals = [], weakAreas = [] } = req.body;
+    
+    if (!words || !Array.isArray(words) || words.length === 0) {
+      return res.status(400).json({ error: 'Words array is required' });
+    }
+
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+    
+    const prompt = `
+    As an English learning specialist, create a personalized learning path for a ${userLevel} level student.
+    
+    Words to learn: ${words.join(', ')}
+    Learning goals: ${learningGoals.join(', ') || 'General improvement'}
+    Weak areas: ${weakAreas.join(', ') || 'None specified'}
+    
+    Please provide:
+    1. Recommended learning order (prioritize words by importance and difficulty)
+    2. Study schedule (how many words per day/week)
+    3. Learning techniques for each word
+    4. Practice exercises suggestions
+    5. Review intervals (spaced repetition schedule)
+    6. Progress milestones
+    
+    Respond in JSON format:
+    {
+      "learningPath": [
+        {
+          "word": "word1",
+          "priority": 1,
+          "studyDay": 1,
+          "techniques": ["technique1", "technique2"],
+          "exercises": ["exercise1", "exercise2"],
+          "reviewDays": [1, 3, 7, 14]
+        }
+      ],
+      "schedule": {
+        "wordsPerDay": 3,
+        "studyDuration": "15-20 minutes",
+        "totalDays": 10
+      },
+      "milestones": [
+        {
+          "day": 7,
+          "goal": "Master first 5 words",
+          "assessment": "Quick quiz"
+        }
+      ]
+    }
+    `;
+
+    // Use retry mechanism for Gemini API call
+    const result = await retryWithBackoff(async () => {
+      const apiResult = await model.generateContent(prompt);
+      const apiResponse = await apiResult.response;
+      return apiResponse.text();
+    });
+    
+    const text = result;
+    
+    try {
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const pathData = JSON.parse(jsonMatch[0]);
+        res.json({
+          success: true,
+          learningPath: pathData
+        });
+      } else {
+        throw new Error('No JSON found in response');
+      }
+    } catch (parseError) {
+      res.json({
+        success: true,
+        learningPath: {
+          rawResponse: text,
+          schedule: {
+            wordsPerDay: Math.min(3, words.length),
+            studyDuration: '15-20 minutes',
+            totalDays: Math.ceil(words.length / 3)
+          }
+        }
+      });
+    }
+    
+  } catch (error) {
+    console.error('Gemini AI Learning Path error:', error.message);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Learning path generation failed', 
+      message: error.message 
+    });
+  }
+});
+
+// AI Word Suggestions Endpoint
+app.post('/api/ai-word-suggestions', checkRateLimit, async (req, res) => {
+  try {
+    const { level, limit = 10, language = 'english', excludeWords = [] } = req.body;
+    
+    if (!level) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Level parameter is required' 
+      });
+    }
+
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+
+    // Create exclude words text for prompt
+    const excludeWordsText = excludeWords.length > 0 
+      ? `\n\nIMPORTANT: Do NOT include any of these words that the user already knows: ${excludeWords.join(', ')}. Generate completely different words.`
+      : '';
+
+    const prompt = `Generate ${limit} English words suitable for CEFR level ${level} learners. 
+    
+    Requirements:
+    - Words should be appropriate for ${level} level (A1=beginner, A2=elementary, B1=intermediate, B2=upper-intermediate, C1=advanced, C2=proficient)
+    - Include a mix of different parts of speech (nouns, verbs, adjectives, adverbs)
+    - Prioritize commonly used, practical vocabulary
+    - Avoid overly technical or specialized terms unless appropriate for the level
+    - Each word should be useful for daily communication${excludeWordsText}
+    
+    Please respond with a JSON array of objects, each containing:
+    {
+      "word": "example",
+      "definition": "brief English definition",
+      "definition_tr": "Turkish translation",
+      "part_of_speech": "noun/verb/adjective/etc",
+      "example": "example sentence in English"
+    }
+    
+    Return only the JSON array, no additional text.`;
+
+    // Use retry mechanism for Gemini API call
+    const result = await retryWithBackoff(async () => {
+      const apiResult = await model.generateContent(prompt);
+      const apiResponse = await apiResult.response;
+      return apiResponse.text();
+    });
+    
+    let text = result;
+    
+    // Clean up the response text
+    text = text.replace(/```json/g, '').replace(/```/g, '').trim();
+    
+    try {
+      const words = JSON.parse(text);
+      
+      if (Array.isArray(words) && words.length > 0) {
+        res.json({
+          success: true,
+          words: words.slice(0, limit), // Ensure we don't exceed the limit
+          level: level,
+          count: Math.min(words.length, limit)
+        });
+      } else {
+        throw new Error('Invalid response format from AI');
+      }
+    } catch (parseError) {
+      console.error('JSON parsing error:', parseError);
+      console.log('Raw AI response:', text);
+      
+      // Fallback: try to extract words from raw text
+      const fallbackWords = [];
+      const lines = text.split('\n').filter(line => line.trim());
+      
+      for (let i = 0; i < Math.min(lines.length, limit); i++) {
+        const line = lines[i].trim();
+        if (line && !line.startsWith('{') && !line.startsWith('[')) {
+          // Simple word extraction
+          const word = line.replace(/[^a-zA-Z]/g, '').toLowerCase();
+          if (word.length > 2) {
+            fallbackWords.push({
+              word: word,
+              definition: `A ${level} level English word`,
+              definition_tr: `${level} seviyesi İngilizce kelime`,
+              part_of_speech: 'unknown',
+              example: `This is an example with ${word}.`
+            });
+          }
+        }
+      }
+      
+      if (fallbackWords.length > 0) {
+        res.json({
+          success: true,
+          words: fallbackWords,
+          level: level,
+          count: fallbackWords.length,
+          note: 'Fallback word generation used'
+        });
+      } else {
+        throw parseError;
+      }
+    }
+    
+  } catch (error) {
+    console.error('AI Word Suggestions error:', error.message);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Word suggestions generation failed', 
+      message: error.message 
+    });
+  }
+});
+
 // Start server
 app.listen(PORT, () => {
   console.log(`🚀 Vocabulary App Backend is running on port ${PORT}`);
@@ -748,6 +1129,9 @@ app.listen(PORT, () => {
   console.log(`📚 Cambridge API: http://localhost:${PORT}/api/cambridge`);
   console.log(`🧠 Level Test API: http://localhost:${PORT}/api/generate-level-test`);
   console.log(`🌐 MyMemory API: http://localhost:${PORT}/api/mymemory`);
+  console.log(`🤖 Gemini Word Learning API: http://localhost:${PORT}/api/word-learning-assistant`);
+  console.log(`📈 Personalized Learning Path API: http://localhost:${PORT}/api/personalized-learning-path`);
+  console.log(`🎯 AI Word Suggestions API: http://localhost:${PORT}/api/ai-word-suggestions`);
 });
 
 module.exports = app;

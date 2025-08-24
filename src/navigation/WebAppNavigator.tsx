@@ -19,16 +19,25 @@ import ProgressScreen from '../screens/profile/ProgressScreen';
 import SettingsScreen from '../screens/profile/SettingsScreen';
 import DictionaryScreen from '../screens/dictionary/DictionaryScreen';
 import SearchScreen from '../screens/dashboard/SearchScreen';
+import WordLearningScreen from '../screens/learning/WordLearningScreen';
+import WordListsScreen from '../screens/learning/WordListsScreen';
+import ProfessionalAssessmentScreen from '../screens/assessment/ProfessionalAssessmentScreen';
 
 // Web Navigation Component
 import WebNavbar from '../components/WebNavbar';
+import { CEFRLevel } from '../types/database';
 
-type Screen = 'login' | 'register' | 'dashboard' | 'tests' | 'test' | 'testResult' | 'dictionary' | 'profile' | 'wordDetail' | 'search' | 'progress' | 'settings';
+type Screen = 'login' | 'register' | 'dashboard' | 'tests' | 'test' | 'testResult' | 'dictionary' | 'profile' | 'wordDetail' | 'search' | 'progress' | 'settings' | 'wordLearning' | 'wordLists' | 'professionalAssessment';
 
 interface NavigationParams {
   testType?: 'level_test' | 'daily_practice' | 'review';
   testId?: number;
   wordId?: number;
+  level?: string;
+  word?: string;
+  isApiWord?: boolean;
+  assessmentType?: 'full' | 'quick' | 'adaptive';
+  targetLevel?: CEFRLevel;
 }
 
 export default function WebAppNavigator() {
@@ -91,6 +100,18 @@ export default function WebAppNavigator() {
         case 'Settings':
           setCurrentScreen('settings');
           break;
+        case 'WordLearning':
+          setCurrentScreen('wordLearning');
+          setNavigationParams(params || {});
+          break;
+        case 'WordLists':
+          setCurrentScreen('wordLists');
+          setNavigationParams(params || {});
+          break;
+        case 'ProfessionalAssessment':
+          setCurrentScreen('professionalAssessment');
+          setNavigationParams(params || {});
+          break;
         default:
           console.warn('Unknown screen:', screen);
       }
@@ -99,7 +120,7 @@ export default function WebAppNavigator() {
       // Simple back navigation - go to dashboard for main screens
       if (['test', 'testResult'].includes(currentScreen)) {
         setCurrentScreen('tests');
-      } else if (['wordDetail', 'search'].includes(currentScreen)) {
+      } else if (['wordDetail', 'search', 'wordLearning', 'wordLists', 'professionalAssessment'].includes(currentScreen)) {
         setCurrentScreen('dashboard');
       } else if (['progress', 'settings'].includes(currentScreen)) {
         setCurrentScreen('profile');
@@ -144,6 +165,12 @@ export default function WebAppNavigator() {
         return <ProgressScreen {...screenProps} />;
       case 'settings':
         return <SettingsScreen {...screenProps} />;
+      case 'wordLearning':
+        return <WordLearningScreen {...screenProps} />;
+      case 'wordLists':
+        return <WordListsScreen {...screenProps} />;
+      case 'professionalAssessment':
+        return <ProfessionalAssessmentScreen {...screenProps} />;
       default:
         return <DashboardScreen {...screenProps} />;
     }

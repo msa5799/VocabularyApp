@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,9 +9,15 @@ import {
   FlatList,
   ActivityIndicator,
   Platform,
+  Alert,
+  Dimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSelector } from 'react-redux';
+import { RootState } from '../../store';
 import realTimeVocabularyAPI, { SearchResult } from '../../services/api/realTimeVocabularyAPI';
+import { firestoreService } from '../../services/storage/firestore';
+import Toast from '../../components/Toast';
 
 interface Props {
   navigation: any;
@@ -22,13 +28,19 @@ interface Props {
 type FilterType = 'all' | 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | 'C2';
 type SortType = 'alphabetical' | 'frequency' | 'level';
 
+const { width } = Dimensions.get('window');
+const isSmallScreen = width < 768;
+const isMobile = width < 480;
+
 const SearchScreen: React.FC<Props> = ({ navigation }) => {
+  const { user } = useSelector((state: RootState) => state.auth);
   const [searchQuery, setSearchQuery] = useState('');
   const [apiResults, setApiResults] = useState<SearchResult[]>([]);
   const [selectedFilter, setSelectedFilter] = useState<FilterType>('all');
   const [selectedSort, setSelectedSort] = useState<SortType>('alphabetical');
   const [isLoading, setIsLoading] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
+  const [toast, setToast] = useState<{ visible: boolean; message: string; type: 'success' | 'error' | 'info' }>({ visible: false, message: '', type: 'success' });
 
   const filterOptions: FilterType[] = ['all', 'A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
   const sortOptions: { key: SortType; label: string }[] = [
@@ -108,6 +120,48 @@ const SearchScreen: React.FC<Props> = ({ navigation }) => {
     });
   };
 
+  const saveWord = async (word: SearchResult, listType: 'learning' | 'saved') => {
+    console.log('saveWord called with:', { word: word.word, listType, user });
+    
+    if (!user) {
+      console.log('No user found');
+      Alert.alert('Hata', 'Kullanıcı oturumu bulunamadı.');
+      return;
+    }
+    
+    if (!user.firebase_uid) {
+      console.log('No firebase_uid found for user:', user);
+      Alert.alert('Hata', 'Firebase kullanıcı kimliği bulunamadı. Lütfen tekrar giriş yapın.');
+      return;
+    }
+
+    try {
+      console.log('Attempting to save word with firebase_uid:', user.firebase_uid);
+      await firestoreService.addWordToListByFirebaseUid(user.firebase_uid, listType, {
+        word: word.word,
+        definition: word.definition_en,
+        type: word.part_of_speech || '',
+        example: word.example_en || '',
+        level: word.cefr_level || 'A1'
+      });
+      
+      console.log('Word saved successfully');
+      const listName = listType === 'learning' ? 'öğrenme' : 'kayıtlı';
+      setToast({
+        visible: true,
+        message: `"${word.word}" kelimesi ${listName} listesine eklendi!`,
+        type: 'success'
+      });
+    } catch (error) {
+      console.error('Error saving word:', error);
+      setToast({
+        visible: true,
+        message: 'Kelime kaydedilirken bir hata oluştu.',
+        type: 'error'
+      });
+    }
+  };
+
   const renderWordItem = ({ item }: { item: SearchResult }) => {
     const cefr_level = item.cefr_level || 'B1';
     const definition = item.definition_tr;
@@ -115,31 +169,49 @@ const SearchScreen: React.FC<Props> = ({ navigation }) => {
     const partOfSpeech = item.part_of_speech;
     
     return (
-      <TouchableOpacity style={styles.wordItem} onPress={() => handleWordPress(item)}>
-        <View style={styles.wordHeader}>
-          <Text style={styles.wordText}>{item.word}</Text>
-          <View style={styles.wordMeta}>
-            <View style={[styles.levelBadge, { backgroundColor: getLevelColor(cefr_level) }]}>
-              <Text style={styles.levelText}>{cefr_level}</Text>
+      <View style={styles.wordItem}>
+        <TouchableOpacity onPress={() => handleWordPress(item)}>
+          <View style={styles.wordHeader}>
+            <Text style={styles.wordText}>{item.word}</Text>
+            <View style={styles.wordMeta}>
+              <View style={[styles.levelBadge, { backgroundColor: getLevelColor(cefr_level) }]}>
+                <Text style={styles.levelText}>{cefr_level}</Text>
+              </View>
+              <View style={styles.apiBadge}>
+                <Ionicons name="globe-outline" size={12} color="#6366f1" />
+                <Text style={styles.apiBadgeText}>API</Text>
+              </View>
+              {partOfSpeech && (
+                <Text style={styles.partOfSpeech}>{partOfSpeech}</Text>
+              )}
             </View>
-            <View style={styles.apiBadge}>
-              <Ionicons name="globe-outline" size={12} color="#6366f1" />
-              <Text style={styles.apiBadgeText}>API</Text>
-            </View>
-            {partOfSpeech && (
-              <Text style={styles.partOfSpeech}>{partOfSpeech}</Text>
-            )}
           </View>
-        </View>
-        <Text style={styles.definitionText} numberOfLines={2}>
-          {definition}
-        </Text>
-        {example && (
-          <Text style={styles.exampleText} numberOfLines={1}>
-            Örnek: {example}
+          <Text style={styles.definitionText} numberOfLines={2}>
+            {definition}
           </Text>
-        )}
-      </TouchableOpacity>
+          {example && (
+            <Text style={styles.exampleText} numberOfLines={1}>
+              Örnek: {example}
+            </Text>
+          )}
+        </TouchableOpacity>
+        <View style={styles.wordActions}>
+          <TouchableOpacity 
+            style={[styles.actionButton, styles.learnButton]} 
+            onPress={() => saveWord(item, 'learning')}
+          >
+            <Ionicons name="school-outline" size={16} color="#fff" />
+            <Text style={styles.actionButtonText}>Öğren</Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={[styles.actionButton, styles.saveButton]} 
+            onPress={() => saveWord(item, 'saved')}
+          >
+            <Ionicons name="bookmark-outline" size={16} color="#fff" />
+            <Text style={styles.actionButtonText}>Kaydet</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
     );
   };
 
@@ -285,6 +357,12 @@ const SearchScreen: React.FC<Props> = ({ navigation }) => {
           />
         )}
       </View>
+      <Toast
+        visible={toast.visible}
+        message={toast.message}
+        type={toast.type}
+        onHide={() => setToast({ ...toast, visible: false })}
+      />
     </View>
   );
 };
@@ -298,42 +376,42 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingTop: 60,
-    paddingBottom: 20,
+    paddingHorizontal: isMobile ? 16 : 20,
+    paddingTop: isMobile ? 50 : 60,
+    paddingBottom: isMobile ? 16 : 20,
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#e5e7eb',
   },
   backButton: {
-    padding: 8,
+    padding: isMobile ? 6 : 8,
   },
   headerTitle: {
-    fontSize: 18,
+    fontSize: isMobile ? 16 : 18,
     fontWeight: 'bold',
     color: '#1f2937',
   },
   filterToggle: {
-    padding: 8,
+    padding: isMobile ? 6 : 8,
   },
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#fff',
-    marginHorizontal: 20,
-    marginVertical: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 12,
+    marginHorizontal: isMobile ? 16 : 20,
+    marginVertical: isMobile ? 12 : 16,
+    paddingHorizontal: isMobile ? 12 : 16,
+    paddingVertical: isMobile ? 10 : 12,
+    borderRadius: isMobile ? 8 : 12,
     borderWidth: 1,
     borderColor: '#e5e7eb',
   },
   searchIcon: {
-    marginRight: 12,
+    marginRight: isMobile ? 8 : 12,
   },
   searchInput: {
     flex: 1,
-    fontSize: 16,
+    fontSize: isMobile ? 14 : 16,
     color: '#1f2937',
   },
   clearButton: {
@@ -341,30 +419,30 @@ const styles = StyleSheet.create({
   },
   filtersContainer: {
     backgroundColor: '#fff',
-    marginHorizontal: 20,
-    marginBottom: 16,
-    padding: 16,
-    borderRadius: 12,
+    marginHorizontal: isMobile ? 16 : 20,
+    marginBottom: isMobile ? 12 : 16,
+    padding: isMobile ? 12 : 16,
+    borderRadius: isMobile ? 8 : 12,
     borderWidth: 1,
     borderColor: '#e5e7eb',
   },
   filterSection: {
-    marginBottom: 16,
+    marginBottom: isMobile ? 12 : 16,
   },
   filterSectionTitle: {
-    fontSize: 14,
+    fontSize: isMobile ? 12 : 14,
     fontWeight: '600',
     color: '#374151',
-    marginBottom: 8,
+    marginBottom: isMobile ? 6 : 8,
   },
   filterRow: {
     flexDirection: 'row',
-    gap: 8,
+    gap: isMobile ? 6 : 8,
   },
   filterButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
+    paddingHorizontal: isMobile ? 12 : 16,
+    paddingVertical: isMobile ? 6 : 8,
+    borderRadius: isMobile ? 16 : 20,
     backgroundColor: '#f3f4f6',
     borderWidth: 1,
     borderColor: '#e5e7eb',
@@ -374,7 +452,7 @@ const styles = StyleSheet.create({
     borderColor: '#6366f1',
   },
   filterButtonText: {
-    fontSize: 14,
+    fontSize: isMobile ? 12 : 14,
     color: '#6b7280',
     fontWeight: '500',
   },
@@ -383,13 +461,13 @@ const styles = StyleSheet.create({
   },
   sortRow: {
     flexDirection: 'row',
-    gap: 8,
+    gap: isMobile ? 6 : 8,
   },
   sortButton: {
     flex: 1,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
+    paddingVertical: isMobile ? 6 : 8,
+    paddingHorizontal: isMobile ? 8 : 12,
+    borderRadius: isMobile ? 6 : 8,
     backgroundColor: '#f3f4f6',
     borderWidth: 1,
     borderColor: '#e5e7eb',
@@ -400,7 +478,7 @@ const styles = StyleSheet.create({
     borderColor: '#6366f1',
   },
   sortButtonText: {
-    fontSize: 14,
+    fontSize: isMobile ? 12 : 14,
     color: '#6b7280',
     fontWeight: '500',
   },
@@ -411,11 +489,11 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   resultsHeader: {
-    paddingHorizontal: 20,
-    paddingVertical: 12,
+    paddingHorizontal: isMobile ? 16 : 20,
+    paddingVertical: isMobile ? 10 : 12,
   },
   resultsCount: {
-    fontSize: 14,
+    fontSize: isMobile ? 12 : 14,
     color: '#6b7280',
     fontWeight: '500',
   },
@@ -425,14 +503,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   listContainer: {
-    paddingHorizontal: 20,
-    paddingBottom: 20,
+    paddingHorizontal: isMobile ? 16 : 20,
+    paddingBottom: isMobile ? 16 : 20,
   },
   wordItem: {
     backgroundColor: '#fff',
-    padding: 16,
-    marginBottom: 12,
-    borderRadius: 12,
+    padding: isMobile ? 12 : 16,
+    marginBottom: isMobile ? 8 : 12,
+    borderRadius: isMobile ? 8 : 12,
     borderWidth: 1,
     borderColor: '#e5e7eb',
   },
@@ -440,10 +518,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 8,
+    marginBottom: isMobile ? 6 : 8,
   },
   wordText: {
-    fontSize: 18,
+    fontSize: isMobile ? 16 : 18,
     fontWeight: 'bold',
     color: '#1f2937',
     flex: 1,
@@ -451,31 +529,31 @@ const styles = StyleSheet.create({
   wordMeta: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: isMobile ? 6 : 8,
   },
   levelBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
+    paddingHorizontal: isMobile ? 6 : 8,
+    paddingVertical: isMobile ? 3 : 4,
+    borderRadius: isMobile ? 8 : 12,
   },
   levelText: {
-    fontSize: 12,
+    fontSize: isMobile ? 10 : 12,
     fontWeight: 'bold',
     color: '#fff',
   },
   partOfSpeech: {
-    fontSize: 12,
+    fontSize: isMobile ? 10 : 12,
     color: '#6b7280',
     fontStyle: 'italic',
   },
   definitionText: {
-    fontSize: 14,
+    fontSize: isMobile ? 12 : 14,
     color: '#374151',
-    lineHeight: 20,
+    lineHeight: isMobile ? 18 : 20,
     marginBottom: 4,
   },
   exampleText: {
-    fontSize: 12,
+    fontSize: isMobile ? 10 : 12,
     color: '#6b7280',
     fontStyle: 'italic',
   },
@@ -483,35 +561,61 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 60,
+    paddingVertical: isMobile ? 40 : 60,
   },
   emptyText: {
-    fontSize: 18,
+    fontSize: isMobile ? 16 : 18,
     fontWeight: '600',
     color: '#374151',
-    marginTop: 16,
-    marginBottom: 8,
+    marginTop: isMobile ? 12 : 16,
+    marginBottom: isMobile ? 6 : 8,
   },
   emptySubtext: {
-    fontSize: 14,
+    fontSize: isMobile ? 12 : 14,
     color: '#6b7280',
     textAlign: 'center',
-    paddingHorizontal: 40,
+    paddingHorizontal: isMobile ? 24 : 40,
   },
 
   apiBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#e0e7ff',
-    paddingHorizontal: 6,
+    paddingHorizontal: isMobile ? 4 : 6,
     paddingVertical: 2,
-    borderRadius: 8,
+    borderRadius: isMobile ? 6 : 8,
   },
   apiBadgeText: {
     color: '#6366f1',
-    fontSize: 10,
+    fontSize: isMobile ? 8 : 10,
     fontWeight: '600',
     marginLeft: 2,
+  },
+  wordActions: {
+    flexDirection: 'row',
+    marginTop: isMobile ? 10 : 12,
+    gap: isMobile ? 6 : 8,
+  },
+  actionButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: isMobile ? 6 : 8,
+    paddingHorizontal: isMobile ? 8 : 12,
+    borderRadius: isMobile ? 6 : 8,
+    gap: isMobile ? 3 : 4,
+  },
+  learnButton: {
+    backgroundColor: '#10b981',
+  },
+  saveButton: {
+    backgroundColor: '#6366f1',
+  },
+  actionButtonText: {
+    color: '#fff',
+    fontSize: isMobile ? 10 : 12,
+    fontWeight: '600',
   },
 });
 

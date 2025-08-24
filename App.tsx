@@ -5,7 +5,7 @@ import { Provider } from 'react-redux';
 import { store } from './src/store';
 import WebAppNavigator from './src/navigation/WebAppNavigator';
 import { databaseService } from './src/services/storage/database';
-import { webStorageService } from './src/services/storage/webStorage';
+// webStorageService removed - using Firestore only
 
 // Import CSS for web platform
 if (Platform.OS === 'web') {
@@ -16,11 +16,8 @@ export default function App() {
   useEffect(() => {
     const initializeApp = async () => {
       try {
-        if (Platform.OS === 'web') {
-          await webStorageService.initializeDatabase();
-        } else {
-          await databaseService.initializeDatabase();
-        }
+        // Using database service for all platforms
+        await databaseService.initializeDatabase();
         console.log('App initialized successfully');
       } catch (error) {
         console.error('App initialization failed:', error);

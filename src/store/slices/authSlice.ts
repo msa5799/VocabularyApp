@@ -1,7 +1,7 @@
 import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
 import { User } from '../../types/database';
 import { databaseService } from '../../services/storage/database';
-import { webStorageService } from '../../services/storage/webStorage';
+// webStorageService removed - using Firestore only
 import { firestoreService } from '../../services/storage/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { hashPassword, verifyPassword } from '../../utils/helpers/auth';
@@ -46,7 +46,7 @@ export const loginUser = createAsyncThunk(
   'auth/loginUser',
   async (credentials: LoginCredentials, { rejectWithValue }) => {
     try {
-      const storageService = Platform.OS === 'web' ? webStorageService : databaseService;
+      const storageService = databaseService; // Using database service for all platforms
       const user = await storageService.getUserByEmail(credentials.email);
       
       if (!user) {
@@ -73,7 +73,7 @@ export const registerUser = createAsyncThunk(
   'auth/registerUser',
   async (userData: RegisterData, { rejectWithValue }) => {
     try {
-      const storageService = Platform.OS === 'web' ? webStorageService : databaseService;
+      const storageService = databaseService; // Using database service for all platforms
       
       // Check if user already exists
       const existingUser = await storageService.getUserByEmail(userData.email);
@@ -113,7 +113,38 @@ export const checkAuthStatus = createAsyncThunk(
     try {
       const userString = await AsyncStorage.getItem('user');
       if (userString) {
-        const user = JSON.parse(userString);
+        const user = JSON.parse(userString) as User;
+        
+        // If user doesn't have firebase_uid, try to find and update it or create in Firestore
+        if (!user.firebase_uid && user.email) {
+          try {
+            let firestoreUser = await firestoreService.getUserByEmail(user.email);
+            
+            // If user doesn't exist in Firestore, create them
+            if (!firestoreUser) {
+              console.log('Creating user in Firestore for migration:', user.email);
+              firestoreUser = await firestoreService.createUser({
+                email: user.email,
+                username: user.username,
+                password_hash: user.password_hash || '',
+                current_level: user.current_level,
+                created_at: user.created_at || new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+                firebase_uid: `migrated_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+              });
+            }
+            
+            if (firestoreUser && firestoreUser.firebase_uid) {
+              user.firebase_uid = firestoreUser.firebase_uid;
+              user.id = firestoreUser.id;
+              await AsyncStorage.setItem('user', JSON.stringify(user));
+              console.log('Updated user with firebase_uid:', user.firebase_uid);
+            }
+          } catch (error) {
+            console.log('Could not update firebase_uid for existing user:', error);
+          }
+        }
+        
         return user;
       }
       return null;
@@ -151,40 +182,28 @@ export const loginWithGoogle = createAsyncThunk(
         return rejectWithValue('Google ile giriş yapılamadı');
       }
       
-      // Firebase kullanıcısını local User tipine dönüştür
+      // Firebase kullanıcısını Firestore'dan al
       const firebaseUser = result.user;
-      const user: User = {
-        id: Date.now(), // Geçici ID, database'e kaydederken gerçek ID alınacak
-        username: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
-        email: firebaseUser.email || '',
-        password_hash: '', // Google auth için gerekli değil
-        current_level: 'A1',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        profile_picture: firebaseUser.photoURL || undefined,
-        google_id: firebaseUser.uid
-      };
+      let user = await firestoreService.getUserByFirebaseUid(firebaseUser.uid);
       
-      // Kullanıcıyı local storage'a kaydet
-      const storageService = Platform.OS === 'web' ? webStorageService : databaseService;
-      
-      // Kullanıcı daha önce kayıtlı mı kontrol et
-      let existingUser;
-      try {
-        existingUser = await storageService.getUserByEmail(user.email);
-      } catch (error) {
-        // Kullanıcı bulunamadı, yeni kullanıcı oluşturacağız
+      if (!user) {
+        // Kullanıcı Firestore'da yoksa oluştur
+        const userData = {
+          username: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
+          email: firebaseUser.email || '',
+          password_hash: '', // Google auth için gerekli değil
+          current_level: 'A1',
+          firebase_uid: firebaseUser.uid,
+          profile_picture: firebaseUser.photoURL || undefined,
+          google_id: firebaseUser.uid,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        };
+        
+        user = await firestoreService.createUser(userData);
       }
       
-      if (!existingUser) {
-        // Yeni kullanıcı oluştur
-        await storageService.createUser(user);
-      } else {
-        // Mevcut kullanıcıyı güncelle
-        user.id = existingUser.id;
-        user.current_level = existingUser.current_level;
-        user.created_at = existingUser.created_at;
-      }
+      console.log('User logged in with Google, firebase_uid:', user.firebase_uid);
       
       // AsyncStorage'a kaydet
       await AsyncStorage.setItem('user', JSON.stringify(user));
@@ -207,8 +226,12 @@ export const updateUserLevel = createAsyncThunk(
         return rejectWithValue('Kullanıcı oturumu bulunamadı');
       }
 
-      const storageService = Platform.OS === 'web' ? webStorageService : databaseService;
-      await storageService.updateUserLevel(user.id, level);
+      if (user.firebase_uid) {
+        await firestoreService.updateUserLevel(user.id, level);
+      } else {
+        const storageService = databaseService; // Using database service for all platforms
+        await storageService.updateUserLevel(parseInt(user.id), level);
+      }
       
       return level;
     } catch (error) {
@@ -275,24 +298,33 @@ export const loginWithFirebase = createAsyncThunk(
         return rejectWithValue('Giriş işlemi başarısız');
       }
       
-      // Firebase kullanıcısını local User tipine dönüştür
+      // Firebase kullanıcısını Firestore'dan al
       const firebaseUser = result.user;
-      const user: User = {
-        id: Date.now(), // Geçici ID
-        username: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
-        email: firebaseUser.email || '',
-        password_hash: '', // Firebase auth için gerekli değil
-        current_level: 'A1', // Default level, Firestore'dan alınabilir
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        firebase_uid: firebaseUser.uid
-      };
+      let user = await firestoreService.getUserByFirebaseUid(firebaseUser.uid);
+      
+      if (!user) {
+        // Kullanıcı Firestore'da yoksa oluştur
+        const userData = {
+          username: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
+          email: firebaseUser.email || '',
+          password_hash: '', // Firebase auth için gerekli değil
+          current_level: 'A1',
+          firebase_uid: firebaseUser.uid,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        };
+        
+        user = await firestoreService.createUser(userData);
+      }
+      
+      console.log('User logged in with firebase_uid:', user.firebase_uid);
       
       // AsyncStorage'a kaydet
       await AsyncStorage.setItem('user', JSON.stringify(user));
       
       return user;
     } catch (error: any) {
+      console.error('Login error:', error);
       const errorMessage = getFirebaseErrorMessage(error.code) || error.message || 'Giriş yapılırken bir hata oluştu';
       return rejectWithValue(errorMessage);
     }

@@ -28,7 +28,7 @@ class FirestoreService {
       
       const createdUser: User = {
         ...user,
-        id: parseInt(userRef.id, 36), // Convert Firestore ID to number
+        id: userRef.id,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       };
@@ -53,7 +53,7 @@ class FirestoreService {
       const userData = userDoc.data();
       
       return {
-        id: parseInt(userDoc.id, 36),
+        id: userDoc.id,
         ...userData
       } as User;
     } catch (error) {
@@ -75,18 +75,24 @@ class FirestoreService {
       const userData = userDoc.data();
       
       return {
-        id: parseInt(userDoc.id, 36),
-        ...userData
-      } as User;
+        id: userDoc.id,
+        email: userData.email,
+        username: userData.username,
+        password_hash: userData.password_hash || '',
+        current_level: userData.current_level,
+        created_at: userData.created_at,
+        updated_at: userData.updated_at,
+        firebase_uid: userData.firebase_uid
+      };
     } catch (error) {
       console.error('Error getting user by Firebase UID:', error);
       throw error;
     }
   }
 
-  async updateUser(userId: number, updates: Partial<User>): Promise<void> {
+  async updateUser(userId: string, updates: Partial<User>): Promise<void> {
     try {
-      const userRef = doc(db, 'users', userId.toString(36));
+      const userRef = doc(db, 'users', userId);
       await updateDoc(userRef, {
         ...updates,
         updated_at: Timestamp.now().toDate().toISOString()
@@ -97,9 +103,9 @@ class FirestoreService {
     }
   }
 
-  async updateUserLevel(userId: number, level: string): Promise<void> {
+  async updateUserLevel(userId: string, level: string): Promise<void> {
     try {
-      const userRef = doc(db, 'users', userId.toString(36));
+      const userRef = doc(db, 'users', userId);
       await updateDoc(userRef, {
         current_level: level,
         updated_at: Timestamp.now().toDate().toISOString()
@@ -294,6 +300,221 @@ class FirestoreService {
       };
     } catch (error) {
       console.error('Error creating daily word:', error);
+      throw error;
+    }
+  }
+
+  // User Word Lists Collection
+  async addWordToList(userId: number, word: any, listType: 'learning' | 'saved' | 'mastered'): Promise<void> {
+    try {
+      // Check if word already exists in user's lists
+      const q = query(
+        collection(db, 'user_word_lists'),
+        where('user_id', '==', userId),
+        where('word.word', '==', word.word)
+      );
+      
+      const querySnapshot = await getDocs(q);
+      
+      if (!querySnapshot.empty) {
+        // Update existing word's list type
+        const wordDoc = querySnapshot.docs[0];
+        await updateDoc(wordDoc.ref, {
+          list_type: listType,
+          added_at: Timestamp.now().toDate().toISOString(),
+          updated_at: Timestamp.now().toDate().toISOString()
+        });
+      } else {
+        // Add new word to list
+        await addDoc(collection(db, 'user_word_lists'), {
+          user_id: userId,
+          word: word,
+          list_type: listType,
+          added_at: Timestamp.now().toDate().toISOString(),
+          review_count: 0,
+          created_at: Timestamp.now().toDate().toISOString(),
+          updated_at: Timestamp.now().toDate().toISOString()
+        });
+      }
+      
+      console.log(`Word '${word.word}' added to ${listType} list for user ${userId}`);
+    } catch (error) {
+      console.error('Error adding word to list:', error);
+      throw error;
+    }
+  }
+
+  async getUserWordLists(userId: number): Promise<{
+    learning: any[];
+    saved: any[];
+    mastered: any[];
+  }> {
+    try {
+      const q = query(
+        collection(db, 'user_word_lists'),
+        where('user_id', '==', userId),
+        orderBy('added_at', 'desc')
+      );
+      
+      const querySnapshot = await getDocs(q);
+      const userWords: any[] = [];
+      
+      querySnapshot.forEach((doc) => {
+        userWords.push({
+          id: doc.id,
+          ...doc.data()
+        });
+      });
+      
+      console.log('Retrieved user words:', userWords.length, 'words');
+      console.log('Sample word structure:', userWords[0] || 'No words found');
+      
+      return {
+        learning: userWords.filter(item => item.list_type === 'learning'),
+        saved: userWords.filter(item => item.list_type === 'saved'),
+        mastered: userWords.filter(item => item.list_type === 'mastered')
+      };
+    } catch (error) {
+      console.error('Error getting user word lists:', error);
+      return { learning: [], saved: [], mastered: [] };
+    }
+  }
+
+  async removeWordFromList(userId: number, wordId: string): Promise<void> {
+    try {
+      const wordRef = doc(db, 'user_word_lists', wordId);
+      await deleteDoc(wordRef);
+      console.log(`Word with id '${wordId}' removed from user ${userId} lists`);
+    } catch (error) {
+      console.error('Error removing word from list:', error);
+      throw error;
+    }
+  }
+
+  async moveWordToList(userId: number, wordId: string, newListType: 'learning' | 'saved' | 'mastered'): Promise<void> {
+    try {
+      const wordRef = doc(db, 'user_word_lists', wordId);
+      const updateData: any = {
+        list_type: newListType,
+        updated_at: Timestamp.now().toDate().toISOString()
+      };
+      
+      if (newListType === 'mastered') {
+        updateData.last_reviewed = Timestamp.now().toDate().toISOString();
+      }
+      
+      await updateDoc(wordRef, updateData);
+      console.log(`Word with id '${wordId}' moved to ${newListType} list for user ${userId}`);
+    } catch (error) {
+      console.error('Error moving word to list:', error);
+      throw error;
+    }
+  }
+
+  async updateWordReviewCount(userId: number, wordId: string): Promise<void> {
+    try {
+      const wordRef = doc(db, 'user_word_lists', wordId);
+      const wordDoc = await getDoc(wordRef);
+      
+      if (wordDoc.exists()) {
+        const currentReviewCount = wordDoc.data().review_count || 0;
+        await updateDoc(wordRef, {
+          review_count: currentReviewCount + 1,
+          last_reviewed: Timestamp.now().toDate().toISOString(),
+          updated_at: Timestamp.now().toDate().toISOString()
+        });
+      }
+    } catch (error) {
+      console.error('Error updating word review count:', error);
+      throw error;
+    }
+  }
+
+  // Firebase UID based methods
+  async addWordToListByFirebaseUid(firebaseUid: string, listType: 'learning' | 'saved' | 'mastered', word: any): Promise<void> {
+    try {
+      // Check if word already exists in user's lists
+      const q = query(
+        collection(db, 'user_word_lists'),
+        where('firebase_uid', '==', firebaseUid),
+        where('word.word', '==', word.word)
+      );
+      
+      const querySnapshot = await getDocs(q);
+      
+      if (!querySnapshot.empty) {
+        // Update existing word's list type
+        const wordDoc = querySnapshot.docs[0];
+        await updateDoc(wordDoc.ref, {
+          list_type: listType,
+          added_at: Timestamp.now().toDate().toISOString(),
+          updated_at: Timestamp.now().toDate().toISOString()
+        });
+      } else {
+        // Add new word to list
+        await addDoc(collection(db, 'user_word_lists'), {
+          firebase_uid: firebaseUid,
+          word: word,
+          list_type: listType,
+          added_at: Timestamp.now().toDate().toISOString(),
+          review_count: 0,
+          created_at: Timestamp.now().toDate().toISOString(),
+          updated_at: Timestamp.now().toDate().toISOString()
+        });
+      }
+      
+      console.log(`Word '${word.word}' added to ${listType} list for firebase user ${firebaseUid}`);
+    } catch (error) {
+      console.error('Error adding word to list:', error);
+      throw error;
+    }
+  }
+
+  async getUserWordListsByFirebaseUid(firebaseUid: string): Promise<{
+    learning: any[];
+    saved: any[];
+    mastered: any[];
+  }> {
+    try {
+      const q = query(
+        collection(db, 'user_word_lists'),
+        where('firebase_uid', '==', firebaseUid)
+      );
+      
+      const querySnapshot = await getDocs(q);
+      const userWords: any[] = [];
+      
+      querySnapshot.forEach((doc) => {
+        userWords.push({
+          id: doc.id,
+          ...doc.data()
+        });
+      });
+      
+      return {
+        learning: userWords.filter(item => item.list_type === 'learning'),
+        saved: userWords.filter(item => item.list_type === 'saved'),
+        mastered: userWords.filter(item => item.list_type === 'mastered')
+      };
+    } catch (error) {
+      console.error('Error getting user word lists:', error);
+      return { learning: [], saved: [], mastered: [] };
+    }
+  }
+
+  async updateUserProgressByFirebaseUid(firebaseUid: string, progress: any): Promise<void> {
+    try {
+      // Create or update user progress document
+      await addDoc(collection(db, 'user_progress'), {
+        firebase_uid: firebaseUid,
+        ...progress,
+        created_at: Timestamp.now().toDate().toISOString(),
+        updated_at: Timestamp.now().toDate().toISOString()
+      });
+      
+      console.log(`Progress updated for firebase user ${firebaseUid}`);
+    } catch (error) {
+      console.error('Error updating user progress:', error);
       throw error;
     }
   }

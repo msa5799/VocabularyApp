@@ -14,12 +14,15 @@ import { loadDailyWords, generateDailyWords } from '../../store/slices/wordsSlic
 import { calculateProgressStats } from '../../store/slices/progressSlice';
 import { Ionicons } from '@expo/vector-icons';
 import realTimeVocabularyAPI, { SearchResult } from '../../services/api/realTimeVocabularyAPI';
+import { firestoreService } from '../../services/storage/firestore';
 
 interface Props {
   navigation: any;
 }
 
-const { width } = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
+const isSmallScreen = width < 768;
+const isMobile = width < 480;
 
 const DashboardScreen: React.FC<Props> = ({ navigation }) => {
   const dispatch = useDispatch<AppDispatch>();
@@ -34,8 +37,8 @@ const DashboardScreen: React.FC<Props> = ({ navigation }) => {
     if (user) {
       // Load daily words and stats
       const today = new Date().toISOString().split('T')[0];
-      dispatch(loadDailyWords({ userId: user.id, date: today }));
-      dispatch(calculateProgressStats(user.id));
+      dispatch(loadDailyWords({ userId: parseInt(user.id), date: today }));
+      dispatch(calculateProgressStats(parseInt(user.id)));
       
       // Load API words
       loadApiDailyWords();
@@ -48,7 +51,19 @@ const DashboardScreen: React.FC<Props> = ({ navigation }) => {
     setApiLoading(true);
     try {
       const level = user.current_level || 'A1';
-      const words = await realTimeVocabularyAPI.getWordsByLevel(level, 5);
+      
+      // Kullanıcının öğrendiği kelimeleri al
+      let excludeWords: string[] = [];
+      if (user.firebase_uid) {
+        const userWordLists = await firestoreService.getUserWordListsByFirebaseUid(user.firebase_uid);
+        excludeWords = [
+          ...userWordLists.learning.map(item => item.word.word),
+          ...userWordLists.saved.map(item => item.word.word),
+          ...userWordLists.mastered.map(item => item.word.word)
+        ];
+      }
+      
+      const words = await realTimeVocabularyAPI.getWordsByLevel(level, 5, excludeWords);
       setApiDailyWords(words);
     } catch (error) {
       console.error('Error loading API daily words:', error);
@@ -63,7 +78,19 @@ const DashboardScreen: React.FC<Props> = ({ navigation }) => {
     setApiLoading(true);
     try {
       const level = user.current_level || 'A1';
-      const words = await realTimeVocabularyAPI.getWordsByLevel(level, 10);
+      
+      // Kullanıcının öğrendiği kelimeleri al
+      let excludeWords: string[] = [];
+      if (user.firebase_uid) {
+        const userWordLists = await firestoreService.getUserWordListsByFirebaseUid(user.firebase_uid);
+        excludeWords = [
+          ...userWordLists.learning.map(item => item.word.word),
+          ...userWordLists.saved.map(item => item.word.word),
+          ...userWordLists.mastered.map(item => item.word.word)
+        ];
+      }
+      
+      const words = await realTimeVocabularyAPI.getWordsByLevel(level, 10, excludeWords);
       setApiDailyWords(words);
     } catch (error) {
       console.error('Error generating API daily words:', error);
@@ -156,23 +183,59 @@ const DashboardScreen: React.FC<Props> = ({ navigation }) => {
       {/* Quick Actions */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Hızlı İşlemler</Text>
-        <View style={styles.actionsContainer}>
+        <View style={styles.actionsGrid}>
           <TouchableOpacity 
             style={[styles.actionCard, styles.actionCardPrimary]}
-            onPress={() => navigateToTest('daily_practice')}
+            onPress={() => navigation.navigate('WordLearning', { level: user?.current_level })}
           >
-            <Ionicons name="school-outline" size={32} color="#fff" />
-            <Text style={styles.actionTitle}>Günlük Pratik</Text>
-            <Text style={styles.actionSubtitle}>10 kelime ile pratik yap</Text>
+            <Ionicons name="library-outline" size={28} color="#fff" />
+            <Text style={styles.actionTitle}>Kelime Öğren</Text>
+            <Text style={styles.actionSubtitle}>Seviyene göre kelimeler</Text>
           </TouchableOpacity>
           
           <TouchableOpacity 
             style={[styles.actionCard, styles.actionCardSecondary]}
+            onPress={() => navigateToTest('daily_practice')}
+          >
+            <Ionicons name="school-outline" size={28} color="#fff" />
+            <Text style={styles.actionTitle}>Günlük Pratik</Text>
+            <Text style={styles.actionSubtitle}>10 kelime ile pratik</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={[styles.actionCard, styles.actionCardTertiary]}
+            onPress={() => navigation.navigate('WordLists')}
+          >
+            <Ionicons name="list-outline" size={28} color="#fff" />
+            <Text style={styles.actionTitle}>Kelime Listem</Text>
+            <Text style={styles.actionSubtitle}>Kayıtlı kelimeler</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={[styles.actionCard, styles.actionCardQuaternary]}
             onPress={() => navigateToTest('review')}
           >
-            <Ionicons name="refresh-outline" size={32} color="#fff" />
+            <Ionicons name="refresh-outline" size={28} color="#fff" />
             <Text style={styles.actionTitle}>Tekrar</Text>
-            <Text style={styles.actionSubtitle}>Öğrenilen kelimeleri tekrarla</Text>
+            <Text style={styles.actionSubtitle}>Öğrenilen kelimeler</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={[styles.actionCard, { backgroundColor: '#dc2626' }]}
+            onPress={() => navigation.navigate('ProfessionalAssessment', { assessmentType: 'full' })}
+          >
+            <Ionicons name="analytics-outline" size={28} color="#fff" />
+            <Text style={styles.actionTitle}>Profesyonel Test</Text>
+            <Text style={styles.actionSubtitle}>Kapsamlı seviye testi</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={[styles.actionCard, { backgroundColor: '#059669' }]}
+            onPress={() => navigation.navigate('ProfessionalAssessment', { assessmentType: 'quick' })}
+          >
+            <Ionicons name="flash-outline" size={28} color="#fff" />
+            <Text style={styles.actionTitle}>Hızlı Değerlendirme</Text>
+            <Text style={styles.actionSubtitle}>20 dakikalık test</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -244,57 +307,62 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 20,
+    padding: isMobile ? 16 : 20,
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#e5e7eb',
+    paddingTop: isMobile ? 50 : 20, // Safe area for mobile
   },
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: isMobile ? 8 : 12,
   },
   searchButton: {
-    padding: 8,
+    padding: isMobile ? 6 : 8,
     borderRadius: 8,
     backgroundColor: '#f3f4f6',
   },
   greeting: {
-    fontSize: 16,
+    fontSize: isMobile ? 14 : 16,
     color: '#6b7280',
   },
   username: {
-    fontSize: 24,
+    fontSize: isMobile ? 20 : 24,
     fontWeight: 'bold',
     color: '#1f2937',
   },
   levelBadge: {
     backgroundColor: '#f3f4f6',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingHorizontal: isMobile ? 8 : 12,
+    paddingVertical: isMobile ? 4 : 6,
     borderRadius: 20,
   },
   levelText: {
-    fontSize: 16,
+    fontSize: isMobile ? 14 : 16,
     fontWeight: 'bold',
   },
   statsContainer: {
-    padding: 20,
+    padding: isMobile ? 16 : 20,
   },
   statsRow: {
-    flexDirection: 'row',
+    flexDirection: isMobile ? 'column' : 'row',
     justifyContent: 'space-between',
-    marginBottom: 12,
+    marginBottom: isMobile ? 8 : 12,
+    gap: isMobile ? 8 : 0,
   },
   statCard: {
-    flex: 1,
+    flex: isMobile ? 0 : 1,
+    width: isMobile ? '100%' : 'auto',
     backgroundColor: '#fff',
-    padding: 16,
+    padding: isMobile ? 12 : 16,
     borderRadius: 12,
     alignItems: 'center',
-    marginHorizontal: 6,
+    marginHorizontal: isMobile ? 0 : 6,
     boxShadow: '0 2px 3.84px rgba(0, 0, 0, 0.1)',
     elevation: 5,
+    flexDirection: isMobile ? 'row' : 'column',
+    justifyContent: isMobile ? 'flex-start' : 'center',
   },
   statCardPrimary: {
     borderLeftWidth: 4,
@@ -313,18 +381,21 @@ const styles = StyleSheet.create({
     borderLeftColor: '#ef4444',
   },
   statNumber: {
-    fontSize: 24,
+    fontSize: isMobile ? 20 : 24,
     fontWeight: 'bold',
     color: '#1f2937',
-    marginVertical: 4,
+    marginVertical: isMobile ? 0 : 4,
+    marginLeft: isMobile ? 12 : 0,
   },
   statLabel: {
-    fontSize: 12,
+    fontSize: isMobile ? 11 : 12,
     color: '#6b7280',
-    textAlign: 'center',
+    textAlign: isMobile ? 'left' : 'center',
+    marginLeft: isMobile ? 12 : 0,
+    flex: isMobile ? 1 : 0,
   },
   section: {
-    padding: 20,
+    padding: isMobile ? 16 : 20,
   },
   sectionHeader: {
     flexDirection: 'row',
@@ -333,7 +404,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   sectionTitle: {
-    fontSize: 20,
+    fontSize: isMobile ? 18 : 20,
     fontWeight: 'bold',
     color: '#1f2937',
   },
@@ -341,12 +412,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
   },
+  actionsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    gap: isMobile ? 8 : 12,
+  },
   actionCard: {
-    flex: 1,
-    padding: 20,
+    width: isMobile ? '48%' : '48%',
+    minHeight: isMobile ? 100 : 120,
+    padding: isMobile ? 12 : 16,
     borderRadius: 12,
     alignItems: 'center',
-    marginHorizontal: 6,
+    justifyContent: 'center',
+    marginBottom: isMobile ? 6 : 8,
   },
   actionCardPrimary: {
     backgroundColor: '#6366f1',
@@ -354,24 +433,31 @@ const styles = StyleSheet.create({
   actionCardSecondary: {
     backgroundColor: '#10b981',
   },
+  actionCardTertiary: {
+    backgroundColor: '#f59e0b',
+  },
+  actionCardQuaternary: {
+    backgroundColor: '#8b5cf6',
+  },
   actionTitle: {
-    fontSize: 16,
+    fontSize: isMobile ? 12 : 14,
     fontWeight: 'bold',
     color: '#fff',
-    marginTop: 8,
+    marginTop: isMobile ? 4 : 6,
+    textAlign: 'center',
   },
   actionSubtitle: {
-    fontSize: 12,
+    fontSize: isMobile ? 10 : 11,
     color: '#e5e7eb',
     textAlign: 'center',
-    marginTop: 4,
+    marginTop: 2,
   },
   wordCard: {
     backgroundColor: '#fff',
-    padding: 16,
+    padding: isMobile ? 12 : 16,
     borderRadius: 12,
-    marginRight: 12,
-    width: width * 0.7,
+    marginRight: isMobile ? 8 : 12,
+    width: isMobile ? width * 0.75 : width * 0.55,
     boxShadow: '0 2px 3.84px rgba(0, 0, 0, 0.1)',
     elevation: 5,
     position: 'relative',
@@ -383,7 +469,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   wordEnglish: {
-    fontSize: 18,
+    fontSize: isMobile ? 16 : 18,
     fontWeight: 'bold',
     color: '#1f2937',
     flex: 1,
@@ -399,12 +485,12 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
   wordTurkish: {
-    fontSize: 16,
+    fontSize: isMobile ? 14 : 16,
     color: '#6b7280',
     marginBottom: 4,
   },
   wordType: {
-    fontSize: 12,
+    fontSize: isMobile ? 11 : 12,
     color: '#9ca3af',
     fontStyle: 'italic',
   },
@@ -421,18 +507,20 @@ const styles = StyleSheet.create({
     padding: 40,
   },
   loadingText: {
-    fontSize: 16,
+    fontSize: isMobile ? 14 : 16,
     color: '#6b7280',
+    textAlign: 'center',
   },
   emptyContainer: {
     alignItems: 'center',
-    padding: 40,
+    padding: isMobile ? 20 : 40,
   },
   emptyText: {
-    fontSize: 16,
+    fontSize: isMobile ? 14 : 16,
     color: '#6b7280',
     marginTop: 12,
     marginBottom: 16,
+    textAlign: 'center',
   },
   generateButton: {
     backgroundColor: '#6366f1',

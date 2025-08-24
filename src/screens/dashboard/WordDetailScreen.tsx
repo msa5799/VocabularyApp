@@ -8,8 +8,11 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-
+import { useSelector } from 'react-redux';
+import { RootState } from '../../store';
 import realTimeVocabularyAPI, { WordData as ApiWordData } from '../../services/api/realTimeVocabularyAPI';
+import { firestoreService } from '../../services/storage/firestore';
+import Toast from '../../components/Toast';
 
 interface Props {
   navigation: any;
@@ -28,8 +31,10 @@ interface Props {
 
 const WordDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   const { wordId, word, isApiWord } = route.params;
+  const { user } = useSelector((state: RootState) => state.auth);
   const [apiWordData, setApiWordData] = useState<ApiWordData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [toast, setToast] = useState<{ visible: boolean; message: string; type: 'success' | 'error' | 'info' }>({ visible: false, message: '', type: 'success' });
 
   useEffect(() => {
     const loadWordData = async () => {
@@ -50,6 +55,59 @@ const WordDetailScreen: React.FC<Props> = ({ navigation, route }) => {
 
     loadWordData();
   }, [word]);
+
+  const saveWord = async (listType: 'learning' | 'saved') => {
+    if (!user) {
+      setToast({
+        visible: true,
+        message: 'Kullanıcı oturumu bulunamadı.',
+        type: 'error'
+      });
+      return;
+    }
+    
+    if (!user.firebase_uid) {
+      setToast({
+        visible: true,
+        message: 'Firebase kullanıcı kimliği bulunamadı. Lütfen tekrar giriş yapın.',
+        type: 'error'
+      });
+      return;
+    }
+
+    if (!apiWordData) {
+      setToast({
+        visible: true,
+        message: 'Kelime verisi bulunamadı.',
+        type: 'error'
+      });
+      return;
+    }
+
+    try {
+      await firestoreService.addWordToListByFirebaseUid(user.firebase_uid, listType, {
+        word: apiWordData.word,
+        definition: apiWordData.meanings[0]?.definitions[0]?.definition || '',
+        type: apiWordData.meanings[0]?.partOfSpeech || '',
+        example: apiWordData.meanings[0]?.definitions[0]?.example || '',
+        level: apiWordData.cefr_level || 'B1'
+      });
+      
+      const listName = listType === 'learning' ? 'öğrenme' : 'kayıtlı';
+      setToast({
+        visible: true,
+        message: `"${apiWordData.word}" kelimesi ${listName} listesine eklendi!`,
+        type: 'success'
+      });
+    } catch (error) {
+      console.error('Error saving word:', error);
+      setToast({
+        visible: true,
+        message: 'Kelime kaydedilirken bir hata oluştu.',
+        type: 'error'
+      });
+    }
+  };
 
   if (loading) {
     return (
@@ -92,26 +150,28 @@ const WordDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     if (!apiWordData) return null;
     
     return (
-      <ScrollView style={styles.container}>
-        <View style={styles.content}>
-          {/* Header */}
-          <View style={styles.header}>
-            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backIcon}>
-              <Ionicons name="arrow-back" size={24} color="#6366f1" />
-            </TouchableOpacity>
-            <View style={styles.headerContent}>
-              <Text style={styles.word}>{apiWordData.word}</Text>
-              <View style={styles.levelBadge}>
-                <Text style={[styles.levelText, { backgroundColor: getLevelColor(apiWordData.cefr_level || 'B1') }]}>
-                  {apiWordData.cefr_level || 'B1'}
-                </Text>
-              </View>
-              <View style={styles.apiBadge}>
-                <Ionicons name="globe-outline" size={16} color="#6366f1" />
-                <Text style={styles.apiBadgeText}>API</Text>
+      <View style={styles.container}>
+        <ScrollView style={{ flex: 1 }}>
+          <View style={styles.content}>
+            {/* Header */}
+            <View style={styles.header}>
+              <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backIcon}>
+                <Ionicons name="arrow-back" size={24} color="#6366f1" />
+              </TouchableOpacity>
+              <View style={styles.headerContent}>
+                <Text style={styles.word}>{apiWordData.word}</Text>
+                <View style={styles.levelBadge}>
+                  <Text style={[styles.levelText, { backgroundColor: getLevelColor(apiWordData.cefr_level || 'B1') }]}>
+                    {apiWordData.cefr_level || 'B1'}
+                  </Text>
+                </View>
+                <View style={styles.apiBadge}>
+                  <Ionicons name="globe-outline" size={16} color="#6366f1" />
+                  <Text style={styles.apiBadgeText}>API</Text>
+                </View>
+                </View>
               </View>
             </View>
-          </View>
 
           {/* Turkish Translation */}
           {apiWordData.word_tr && (
@@ -184,7 +244,7 @@ const WordDetailScreen: React.FC<Props> = ({ navigation, route }) => {
           {/* Action Buttons */}
           <View style={styles.card}>
             <View style={styles.actionButtons}>
-              <TouchableOpacity style={styles.actionButton}>
+              <TouchableOpacity style={styles.actionButton} onPress={() => saveWord('saved')}>
                 <Ionicons name="bookmark-outline" size={20} color="#6366f1" />
                 <Text style={styles.actionButtonText}>Kaydet</Text>
               </TouchableOpacity>
@@ -200,8 +260,14 @@ const WordDetailScreen: React.FC<Props> = ({ navigation, route }) => {
               </TouchableOpacity>
             </View>
           </View>
-        </View>
-      </ScrollView>
+        </ScrollView>
+        <Toast
+          visible={toast.visible}
+          message={toast.message}
+          type={toast.type}
+          onHide={() => setToast({ ...toast, visible: false })}
+        />
+      </View>
     );
   };
 

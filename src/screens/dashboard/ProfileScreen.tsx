@@ -9,6 +9,7 @@ import {
   TextInput,
   Modal,
   Platform,
+  Dimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSelector, useDispatch } from 'react-redux';
@@ -27,6 +28,11 @@ interface UserStats {
   streak: number;
   level: string;
 }
+
+// Get screen dimensions outside component for StyleSheet
+const { width } = Dimensions.get('window');
+const isSmallScreen = width < 768;
+const isMobile = width < 480;
 
 const ProfileScreen: React.FC<Props> = ({ navigation }) => {
   const dispatch = useDispatch<AppDispatch>();
@@ -263,14 +269,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#f8fafc',
   },
   content: {
-    padding: 20,
+    padding: isMobile ? 16 : 20,
   },
   profileHeader: {
     backgroundColor: '#ffffff',
-    borderRadius: 16,
-    padding: 24,
+    borderRadius: isMobile ? 12 : 16,
+    padding: isMobile ? 16 : 24,
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: isMobile ? 16 : 20,
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
@@ -285,15 +291,15 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   avatar: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+    width: isMobile ? 64 : 80,
+    height: isMobile ? 64 : 80,
+    borderRadius: isMobile ? 32 : 40,
     backgroundColor: '#6366f1',
     justifyContent: 'center',
     alignItems: 'center',
   },
   avatarText: {
-    fontSize: 32,
+    fontSize: isMobile ? 24 : 32,
     fontWeight: 'bold',
     color: '#ffffff',
   },
@@ -311,33 +317,33 @@ const styles = StyleSheet.create({
     borderColor: '#ffffff',
   },
   userName: {
-    fontSize: 24,
+    fontSize: isMobile ? 20 : 24,
     fontWeight: 'bold',
     color: '#1f2937',
     marginBottom: 4,
   },
   userEmail: {
-    fontSize: 16,
+    fontSize: isMobile ? 14 : 16,
     color: '#6b7280',
-    marginBottom: 16,
+    marginBottom: isMobile ? 12 : 16,
   },
   levelBadge: {
     marginTop: 8,
   },
   levelText: {
     color: '#ffffff',
-    fontSize: 14,
+    fontSize: isMobile ? 12 : 14,
     fontWeight: '600',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingHorizontal: isMobile ? 12 : 16,
+    paddingVertical: isMobile ? 6 : 8,
     borderRadius: 20,
     overflow: 'hidden',
   },
   card: {
     backgroundColor: '#ffffff',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 20,
+    borderRadius: isMobile ? 12 : 16,
+    padding: isMobile ? 16 : 20,
+    marginBottom: isMobile ? 16 : 20,
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
@@ -348,10 +354,10 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   cardTitle: {
-    fontSize: 18,
+    fontSize: isMobile ? 16 : 18,
     fontWeight: 'bold',
     color: '#1f2937',
-    marginBottom: 16,
+    marginBottom: isMobile ? 12 : 16,
   },
   progressContainer: {
     marginBottom: 12,
@@ -368,11 +374,11 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
   progressText: {
-    fontSize: 14,
+    fontSize: isMobile ? 12 : 14,
     color: '#6b7280',
   },
   progressPercentage: {
-    fontSize: 16,
+    fontSize: isMobile ? 14 : 16,
     fontWeight: '600',
     color: '#6366f1',
   },
@@ -380,15 +386,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
-    marginBottom: 20,
+    marginBottom: isMobile ? 16 : 20,
   },
   statCard: {
     backgroundColor: '#ffffff',
-    borderRadius: 12,
-    padding: 16,
+    borderRadius: isMobile ? 8 : 12,
+    padding: isMobile ? 12 : 16,
     alignItems: 'center',
     width: '48%',
-    marginBottom: 12,
+    marginBottom: isMobile ? 8 : 12,
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
@@ -399,13 +405,13 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   statNumber: {
-    fontSize: 24,
+    fontSize: isMobile ? 20 : 24,
     fontWeight: 'bold',
     color: '#1f2937',
-    marginTop: 8,
+    marginTop: isMobile ? 6 : 8,
   },
   statLabel: {
-    fontSize: 12,
+    fontSize: isMobile ? 10 : 12,
     color: '#6b7280',
     marginTop: 4,
     textAlign: 'center',
@@ -414,7 +420,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 16,
+    paddingVertical: isMobile ? 12 : 16,
     borderBottomWidth: 1,
     borderBottomColor: '#f3f4f6',
   },
@@ -423,9 +429,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   settingText: {
-    fontSize: 16,
+    fontSize: isMobile ? 14 : 16,
     color: '#1f2937',
-    marginLeft: 12,
+    marginLeft: isMobile ? 8 : 12,
   },
   logoutButton: {
     flexDirection: 'row',
@@ -434,15 +440,15 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
     borderWidth: 1,
     borderColor: '#ef4444',
-    borderRadius: 12,
-    paddingVertical: 16,
-    marginTop: 20,
+    borderRadius: isMobile ? 8 : 12,
+    paddingVertical: isMobile ? 12 : 16,
+    marginTop: isMobile ? 16 : 20,
   },
   logoutText: {
     color: '#ef4444',
-    fontSize: 16,
+    fontSize: isMobile ? 14 : 16,
     fontWeight: '600',
-    marginLeft: 8,
+    marginLeft: isMobile ? 6 : 8,
   },
   modalContainer: {
     flex: 1,
@@ -452,47 +458,47 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingHorizontal: isMobile ? 16 : 20,
+    paddingVertical: isMobile ? 12 : 16,
     backgroundColor: '#ffffff',
     borderBottomWidth: 1,
     borderBottomColor: '#e5e7eb',
   },
   modalCancel: {
-    fontSize: 16,
+    fontSize: isMobile ? 14 : 16,
     color: '#6b7280',
   },
   modalTitle: {
-    fontSize: 18,
+    fontSize: isMobile ? 16 : 18,
     fontWeight: 'bold',
     color: '#1f2937',
   },
   modalSave: {
-    fontSize: 16,
+    fontSize: isMobile ? 14 : 16,
     fontWeight: '600',
     color: '#6366f1',
   },
   modalContent: {
     flex: 1,
-    padding: 20,
+    padding: isMobile ? 16 : 20,
   },
   inputGroup: {
-    marginBottom: 20,
+    marginBottom: isMobile ? 16 : 20,
   },
   inputLabel: {
-    fontSize: 16,
+    fontSize: isMobile ? 14 : 16,
     fontWeight: '600',
     color: '#1f2937',
-    marginBottom: 8,
+    marginBottom: isMobile ? 6 : 8,
   },
   textInput: {
     backgroundColor: '#ffffff',
     borderWidth: 1,
     borderColor: '#e5e7eb',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    fontSize: 16,
+    borderRadius: isMobile ? 8 : 12,
+    paddingHorizontal: isMobile ? 12 : 16,
+    paddingVertical: isMobile ? 10 : 12,
+    fontSize: isMobile ? 14 : 16,
     color: '#1f2937',
   },
 });
