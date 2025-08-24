@@ -1,0 +1,21 @@
+/* Global styles for web platform */
+
+/* Remove default focus outline from all input elements */
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+/* Remove default focus styles from React Native TextInput components */
+[data-focusable="true"]:focus {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+/* Remove focus styles from any element with role="textbox" */
+[role="textbox"]:focus {
+  outline: none !important;
+  box-shadow: none !important;
+}

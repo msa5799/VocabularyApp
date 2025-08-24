@@ -27,17 +27,57 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
   const dispatch = useDispatch<AppDispatch>();
   const { isLoading, error } = useSelector((state: RootState) => state.auth);
 
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  const validateForm = () => {
+    setValidationError(null);
+
+    if (!email.trim() && !password.trim()) {
+      setValidationError('E-posta ve şifre alanları boş bırakılamaz');
+      return false;
+    }
+
+    if (!email.trim()) {
+      setValidationError('E-posta adresi gereklidir');
+      return false;
+    }
+
+    if (!password.trim()) {
+      setValidationError('Şifre gereklidir');
+      return false;
+    }
+
+    // E-posta format kontrolü
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email.trim())) {
+      setValidationError('Geçerli bir e-posta adresi girin');
+      return false;
+    }
+
+    if (password.length < 6) {
+      setValidationError('Şifre en az 6 karakter olmalıdır');
+      return false;
+    }
+
+    return true;
+  };
+
   const handleLogin = async () => {
-    if (!email.trim() || !password.trim()) {
-      Alert.alert('Hata', 'Lütfen tüm alanları doldurun');
+    if (!validateForm()) {
       return;
     }
+
+    // Önceki hataları ve mesajları temizle
+    setValidationError(null);
+    setSuccessMessage(null);
 
     try {
       // Firebase Authentication ile giriş yap
       await dispatch(loginWithFirebase({ email: email.trim(), password })).unwrap();
     } catch (error) {
-      Alert.alert('Giriş Hatası', error as string);
+      // Hata Redux state'inde işlenecek ve UI'da gösterilecek
+      console.error('Login error:', error);
     }
   };
 
@@ -46,10 +86,16 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
   };
 
   const handleGoogleLogin = async () => {
+    // Önceki hataları ve mesajları temizle
+    setValidationError(null);
+    setSuccessMessage(null);
+
     try {
       await dispatch(loginWithGoogle()).unwrap();
+      setSuccessMessage('Google ile giriş başarılı! Hoş geldiniz.');
     } catch (error) {
-      Alert.alert('Google Giriş Hatası', error as string);
+      // Hata Redux state'inde işlenecek ve UI'da gösterilecek
+      console.error('Google login error:', error);
     }
   };
 
@@ -128,11 +174,32 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
             </Text>
           </TouchableOpacity>
 
-          {error && (
-            <View style={styles.errorContainer}>
-              <Text style={styles.errorText}>{error}</Text>
-            </View>
-          )}
+          {/* Fixed Message Area */}
+          <View style={styles.messageArea}>
+            {/* Success Message */}
+            {successMessage && (
+              <View style={styles.successContainer}>
+                <Ionicons name="checkmark-circle-outline" size={16} color="#16a34a" style={styles.successIcon} />
+                <Text style={styles.successText}>{successMessage}</Text>
+              </View>
+            )}
+
+            {/* Validation Error Message */}
+            {validationError && (
+              <View style={styles.errorContainer}>
+                <Ionicons name="alert-circle-outline" size={16} color="#dc2626" style={styles.errorIcon} />
+                <Text style={styles.errorText}>{validationError}</Text>
+              </View>
+            )}
+
+            {/* Redux Error Message */}
+            {error && (
+              <View style={styles.errorContainer}>
+                <Ionicons name="alert-circle-outline" size={16} color="#dc2626" style={styles.errorIcon} />
+                <Text style={styles.errorText}>{error}</Text>
+              </View>
+            )}
+          </View>
         </View>
 
         <View style={styles.footer}>
@@ -218,10 +285,39 @@ const styles = StyleSheet.create({
     marginTop: 16,
     borderLeftWidth: 4,
     borderLeftColor: '#ef4444',
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  errorIcon: {
+    marginRight: 8,
   },
   errorText: {
     color: '#dc2626',
     fontSize: 14,
+    flex: 1,
+  },
+  messageArea: {
+    minHeight: 60,
+    marginBottom: 16,
+    justifyContent: 'center',
+  },
+  successContainer: {
+    backgroundColor: '#dcfce7',
+    borderColor: '#16a34a',
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  successIcon: {
+    marginRight: 8,
+  },
+  successText: {
+    color: '#16a34a',
+    fontSize: 14,
+    flex: 1,
   },
   footer: {
     flexDirection: 'row',

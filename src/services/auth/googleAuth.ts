@@ -88,19 +88,52 @@ export const signInWithEmailPassword = async (email: string, password: string): 
 // Firebase Auth hatalarını Türkçe'ye çevirme
 export const getFirebaseErrorMessage = (errorCode: string): string => {
   switch (errorCode) {
+    // E-posta ile ilgili hatalar
     case 'auth/email-already-in-use':
-      return 'Bu e-posta adresi zaten kullanılıyor';
-    case 'auth/weak-password':
-      return 'Şifre çok zayıf';
+      return 'Bu e-posta adresi zaten kullanılıyor. Farklı bir e-posta deneyin veya giriş yapın';
     case 'auth/invalid-email':
-      return 'Geçersiz e-posta adresi';
+      return 'Geçersiz e-posta adresi formatı. Lütfen doğru bir e-posta adresi girin';
     case 'auth/user-not-found':
-      return 'Kullanıcı bulunamadı';
+      return 'Bu e-posta adresi ile kayıtlı kullanıcı bulunamadı. Kayıt olmayı deneyin';
+    
+    // Şifre ile ilgili hatalar
+    case 'auth/weak-password':
+      return 'Şifre çok zayıf. En az 6 karakter, bir harf ve bir rakam içermelidir';
     case 'auth/wrong-password':
-      return 'Hatalı şifre';
+      return 'Hatalı şifre. Lütfen şifrenizi kontrol edin veya şifre sıfırlama yapın';
+    
+    // Güvenlik ve erişim hataları
     case 'auth/too-many-requests':
-      return 'Çok fazla deneme yapıldı, lütfen daha sonra tekrar deneyin';
+      return 'Çok fazla başarısız deneme yapıldı. Lütfen bir süre bekleyip tekrar deneyin';
+    case 'auth/user-disabled':
+      return 'Bu hesap devre dışı bırakılmış. Destek ekibi ile iletişime geçin';
+    case 'auth/operation-not-allowed':
+      return 'Bu işlem şu anda izin verilmiyor. Lütfen daha sonra tekrar deneyin';
+    
+    // Ağ ve bağlantı hataları
+    case 'auth/network-request-failed':
+      return 'İnternet bağlantısı sorunu. Lütfen bağlantınızı kontrol edin';
+    case 'auth/timeout':
+      return 'İşlem zaman aşımına uğradı. Lütfen tekrar deneyin';
+    
+    // Google Auth hataları
+    case 'auth/popup-closed-by-user':
+      return 'Google giriş penceresi kapatıldı. Lütfen tekrar deneyin';
+    case 'auth/popup-blocked':
+      return 'Popup engellenmiş. Lütfen tarayıcı ayarlarınızı kontrol edin';
+    case 'auth/cancelled-popup-request':
+      return 'Google giriş işlemi iptal edildi';
+    
+    // Genel hatalar
+    case 'auth/internal-error':
+      return 'Sunucu hatası oluştu. Lütfen daha sonra tekrar deneyin';
+    case 'auth/invalid-credential':
+      return 'Geçersiz kimlik bilgileri. Lütfen bilgilerinizi kontrol edin';
+    case 'auth/credential-already-in-use':
+      return 'Bu kimlik bilgileri başka bir hesap tarafından kullanılıyor';
+    
+    // Varsayılan hata
     default:
-      return 'Bir hata oluştu';
+      return 'Beklenmeyen bir hata oluştu. Lütfen tekrar deneyin veya destek ekibi ile iletişime geçin';
   }
 };

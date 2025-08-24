@@ -3,9 +3,14 @@ import { StatusBar } from 'expo-status-bar';
 import { Platform } from 'react-native';
 import { Provider } from 'react-redux';
 import { store } from './src/store';
-import SimpleWebNavigator from './src/navigation/SimpleWebNavigator';
+import WebAppNavigator from './src/navigation/WebAppNavigator';
 import { databaseService } from './src/services/storage/database';
 import { webStorageService } from './src/services/storage/webStorage';
+
+// Import CSS for web platform
+if (Platform.OS === 'web') {
+  require('./assets/styles.css');
+}
 
 export default function App() {
   useEffect(() => {
@@ -28,7 +33,7 @@ export default function App() {
   return (
     <Provider store={store}>
       <StatusBar style="auto" />
-      <SimpleWebNavigator />
+      <WebAppNavigator />
     </Provider>
   );
 }

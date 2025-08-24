@@ -4,10 +4,11 @@ import {
   Text,
   StyleSheet,
   TextInput,
-  ScrollView,
   TouchableOpacity,
+  ScrollView,
   FlatList,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import realTimeVocabularyAPI, { SearchResult } from '../../services/api/realTimeVocabularyAPI';

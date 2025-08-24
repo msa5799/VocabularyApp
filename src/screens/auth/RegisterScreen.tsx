@@ -14,7 +14,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import { AppDispatch, RootState } from '../../store';
 import { registerUser, loginWithGoogle, registerWithFirebase } from '../../store/slices/authSlice';
 import { Ionicons } from '@expo/vector-icons';
-import { validateEmail, validatePassword } from '../../utils/helpers/auth';
+import { validatePassword, validateUsername } from '../../utils/helpers/auth';
 
 interface Props {
   navigation: any;
@@ -42,32 +42,58 @@ const RegisterScreen: React.FC<Props> = ({ navigation }) => {
   const validateForm = () => {
     const { username, email, password, confirmPassword } = formData;
     
-    // Clear previous errors
     setValidationError(null);
 
-    if (!username.trim() || !email.trim() || !password || !confirmPassword) {
-      setValidationError('Lütfen tüm alanları doldurun');
+    // Boş alan kontrolleri
+    if (!username.trim() && !email.trim() && !password.trim() && !confirmPassword.trim()) {
+      setValidationError('Tüm alanlar doldurulmalıdır');
       return false;
     }
 
-    if (username.trim().length < 3) {
-      setValidationError('Kullanıcı adı en az 3 karakter olmalıdır');
+    if (!username.trim()) {
+      setValidationError('Kullanıcı adı gereklidir');
       return false;
     }
 
-    if (!validateEmail(email)) {
+    if (!email.trim()) {
+      setValidationError('E-posta adresi gereklidir');
+      return false;
+    }
+
+    if (!password.trim()) {
+      setValidationError('Şifre gereklidir');
+      return false;
+    }
+
+    if (!confirmPassword.trim()) {
+      setValidationError('Şifre onayı gereklidir');
+      return false;
+    }
+
+    // Kullanıcı adı doğrulama
+    const usernameValidation = validateUsername(username.trim());
+    if (!usernameValidation.isValid) {
+      setValidationError(usernameValidation.message);
+      return false;
+    }
+
+    // E-posta doğrulama
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email.trim())) {
       setValidationError('Geçerli bir e-posta adresi girin');
       return false;
     }
 
+    // Şifre doğrulama
     const passwordValidation = validatePassword(password);
     if (!passwordValidation.isValid) {
       setValidationError(passwordValidation.message);
       return false;
     }
 
+    // Şifre eşleşme kontrolü
     if (password !== confirmPassword) {
-      setValidationError('Şifreler eşleşmiyor');
+      setValidationError('Şifreler eşleşmiyor. Lütfen aynı şifreyi tekrar girin');
       return false;
     }
 
@@ -91,7 +117,7 @@ const RegisterScreen: React.FC<Props> = ({ navigation }) => {
         password: formData.password,
       })).unwrap();
       
-      setSuccessMessage('Hesabınız oluşturuldu! Giriş yapabilirsiniz.');
+      setSuccessMessage('Kayıt başarıyla tamamlandı! Hoş geldiniz.');
       // Navigate after a short delay to show success message
       setTimeout(() => {
         navigation.navigate('Login');
@@ -250,26 +276,32 @@ const RegisterScreen: React.FC<Props> = ({ navigation }) => {
             </Text>
           </TouchableOpacity>
 
-          {/* Validation Error Message */}
-          {validationError && (
-            <View style={styles.errorContainer}>
-              <Text style={styles.errorText}>{validationError}</Text>
-            </View>
-          )}
+          {/* Fixed Message Area */}
+          <View style={styles.messageArea}>
+            {/* Success Message */}
+            {successMessage && (
+              <View style={styles.successContainer}>
+                <Ionicons name="checkmark-circle-outline" size={16} color="#16a34a" style={styles.successIcon} />
+                <Text style={styles.successText}>{successMessage}</Text>
+              </View>
+            )}
 
-          {/* Redux Error Message */}
-          {error && (
-            <View style={styles.errorContainer}>
-              <Text style={styles.errorText}>{error}</Text>
-            </View>
-          )}
+            {/* Validation Error Message */}
+            {validationError && (
+              <View style={styles.errorContainer}>
+                <Ionicons name="alert-circle-outline" size={16} color="#dc2626" style={styles.errorIcon} />
+                <Text style={styles.errorText}>{validationError}</Text>
+              </View>
+            )}
 
-          {/* Success Message */}
-          {successMessage && (
-            <View style={styles.successContainer}>
-              <Text style={styles.successText}>{successMessage}</Text>
-            </View>
-          )}
+            {/* Redux Error Message */}
+            {error && (
+              <View style={styles.errorContainer}>
+                <Ionicons name="alert-circle-outline" size={16} color="#dc2626" style={styles.errorIcon} />
+                <Text style={styles.errorText}>{error}</Text>
+              </View>
+            )}
+          </View>
         </View>
 
         <View style={styles.footer}>
@@ -355,10 +387,16 @@ const styles = StyleSheet.create({
     marginTop: 16,
     borderLeftWidth: 4,
     borderLeftColor: '#ef4444',
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  errorIcon: {
+    marginRight: 8,
   },
   errorText: {
     color: '#dc2626',
     fontSize: 14,
+    flex: 1,
   },
   successContainer: {
     backgroundColor: '#f0fdf4',
@@ -367,10 +405,16 @@ const styles = StyleSheet.create({
     marginTop: 16,
     borderLeftWidth: 4,
     borderLeftColor: '#22c55e',
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  successIcon: {
+    marginRight: 8,
   },
   successText: {
     color: '#16a34a',
     fontSize: 14,
+    flex: 1,
   },
   footer: {
     flexDirection: 'row',
@@ -421,6 +465,10 @@ const styles = StyleSheet.create({
     color: '#374151',
     fontSize: 16,
     fontWeight: '600',
+  },
+  messageArea: {
+    minHeight: 60,
+    justifyContent: 'flex-start',
   },
 });
 
